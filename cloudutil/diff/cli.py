@@ -23,6 +23,11 @@ class Format(str, Enum):
     json = "json"
 
 
+class SchemaTarget(str, Enum):
+    diff = "diff"
+    ydiff = "ydiff"
+
+
 def _err(msg: str) -> None:
     console.print(f"[bold red][ERROR][/bold red] {msg}")
 
@@ -75,6 +80,14 @@ def diff_cmd(
             show_default=False,
         ),
     ] = None,
+    print_schema: Annotated[
+        SchemaTarget | None,
+        typer.Option(
+            "--print-schema",
+            help="Print config JSON schema and exit. Choices: diff (--config format), ydiff (--ydiff format).",
+            show_default=False,
+        ),
+    ] = None,
 ) -> None:
     """
     [bold cyan]Semantic diff[/bold cyan] — compare JSON, YAML, or TOML config files structurally.
@@ -98,6 +111,19 @@ def diff_cmd(
       --format table             table layout
       --format json              machine-readable JSON
     """
+    if print_schema is not None:
+        import yaml as _yaml
+
+        if print_schema == SchemaTarget.diff:
+            schema = DiffConfig.model_json_schema()
+        else:
+            from cloudutil.os_utils.yaml_diff import DiffCheckConfig
+
+            schema = DiffCheckConfig.model_json_schema()
+
+        print(_yaml.dump(schema, default_flow_style=False, sort_keys=False))
+        raise typer.Exit(0)
+
     if ydiff:
         _ydiff.run(ydiff)
         return

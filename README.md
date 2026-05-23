@@ -560,6 +560,18 @@ Notes:
 - At least 2 files are required per check.
 - `$branch` auto-resolves to the current git branch name for that file path.
 
+#### Print config schema
+
+Print the full JSON schema (as YAML) for either config format:
+
+```bash
+# Schema for --config diff config file
+cu diff --print-schema diff
+
+# Schema for --ydiff config file
+cu diff --print-schema ydiff
+```
+
 ### Taskfile Operations
 
 Run [Taskfile](https://taskfile.dev/) tasks through CloudUtil. `cu task` replaces the current process with `task`, forwarding extra arguments for full interactive TTY behavior.

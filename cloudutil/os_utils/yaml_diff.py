@@ -11,7 +11,7 @@ from typing import Any
 import jmespath
 import typer
 import yaml
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from rich import box
 from rich.panel import Panel
 from rich.table import Table
@@ -50,8 +50,12 @@ def get_git_branch(file_path: str) -> str:
 
 
 class FileEntry(BaseModel):
-    alias: str
-    path: str
+    alias: str = Field(
+        description="Display name for this file in diff output. Use '$branch' to resolve to the current git branch name automatically."
+    )
+    path: str = Field(
+        description="Path to the YAML file. Relative paths are resolved from the working directory."
+    )
 
     @field_validator("alias", "path")
     @classmethod
@@ -75,9 +79,17 @@ class FileEntry(BaseModel):
 
 
 class DiffCheckEntry(BaseModel):
-    jsmec: str
-    files: list[FileEntry] = Field(default_factory=list)
-    ignore_patterns: list[str] = Field(default_factory=list)
+    jsmec: str = Field(
+        description="JMESPath expression used to extract the node to compare from each YAML file (e.g. 'configMap', 'spec.template')."
+    )
+    files: list[FileEntry] = Field(
+        default_factory=list,
+        description="List of YAML files to compare. At least 2 required. Every combination of pairs is compared.",
+    )
+    ignore_patterns: list[str] = Field(
+        default_factory=list,
+        description="Suppress diff lines where the value contains any of these substrings (case-insensitive).",
+    )
 
     @field_validator("jsmec")
     @classmethod
@@ -113,7 +125,29 @@ class DiffCheckEntry(BaseModel):
 
 
 class DiffCheckConfig(BaseModel):
-    checks: list[DiffCheckEntry] = Field(default_factory=list)
+    """Configuration file format for `cu diff --ydiff`. Top-level key is 'ydiff'."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "ydiff": [
+                    {
+                        "jsmec": "configMap",
+                        "files": [
+                            {"app-v1": "./values/main.yaml"},
+                            {"$branch": "./values/feature.yaml"},
+                        ],
+                        "ignore_patterns": ["test", "dev"],
+                    }
+                ]
+            }
+        }
+    )
+
+    checks: list[DiffCheckEntry] = Field(
+        default_factory=list,
+        description="List of JMESPath diff checks. Each entry compares a specific node across multiple YAML files.",
+    )
 
     @model_validator(mode="after")
     def at_least_one_check(self) -> "DiffCheckConfig":

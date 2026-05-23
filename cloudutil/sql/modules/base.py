@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from jinja2 import Environment, FileSystemLoader
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from cloudutil.utils import resolve_env_variable
 
@@ -196,6 +196,63 @@ class CustomSQLQuery(BaseModel):
 
 class SQLConfig(BaseModel):
     """Complete SQL configuration schema"""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "provider": {
+                    "name": "postgres",
+                    "version": 17,
+                    "host": "localhost",
+                    "port": 5432,
+                    "username": "${POSTGRES_USER}",
+                    "password": "${POSTGRES_PASSWORD}",
+                    "ssl_mode": None,
+                    "cert": None,
+                },
+                "database": [
+                    {
+                        "name": "myapp",
+                        "create": True,
+                        "extensions": [{"name": "uuid-ossp"}, {"name": "pgcrypto"}],
+                    }
+                ],
+                "users": [
+                    {
+                        "name": "app_readwrite",
+                        "password": "${APP_RW_PASSWORD}",
+                        "privileges": [
+                            {
+                                "db": "myapp",
+                                "db_schema": "public",
+                                "readwrite": True,
+                                "tables": ["ALL"],
+                            }
+                        ],
+                    },
+                    {
+                        "name": "app_readonly",
+                        "password": "${APP_RO_PASSWORD}",
+                        "privileges": [
+                            {
+                                "db": "myapp",
+                                "db_schema": "public",
+                                "readonly": True,
+                                "tables": ["users", "sessions"],
+                            }
+                        ],
+                    },
+                ],
+                "custom_sql": [
+                    {
+                        "name": "seed",
+                        "database": "myapp",
+                        "query": "INSERT INTO settings (key, value) VALUES ('init', 'true') ON CONFLICT DO NOTHING",
+                    }
+                ],
+            }
+        }
+    )
 
     provider: ProviderConfig = Field(description="Database server connection details.")
     database: list[DatabaseConfig] | dict[str, DatabaseConfig] = Field(

@@ -15,14 +15,30 @@ SSL_VERIFY_MODES = {"verify-ca", "verify-full"}
 class ProviderConfig(BaseModel):
     """Base provider configuration"""
 
-    name: str
-    version: str | int
-    host: str
-    port: int
-    username: str
-    password: str
-    cert: str | None = None
-    ssl_mode: str | None = None
+    name: str = Field(
+        description="Database provider type. Currently only 'postgres' is supported."
+    )
+    version: str | int = Field(
+        description="PostgreSQL server version (e.g. 17 or '17.2')."
+    )
+    host: str = Field(description="Hostname or IP address of the database server.")
+    port: int = Field(
+        description="TCP port the database server listens on (default: 5432)."
+    )
+    username: str = Field(
+        description="Login role used to connect. Supports ${ENV_VAR} substitution."
+    )
+    password: str = Field(
+        description="Password for the login role. Supports ${ENV_VAR} substitution."
+    )
+    cert: str | None = Field(
+        default=None,
+        description="Path to SSL root certificate. Required when ssl_mode is 'verify-ca' or 'verify-full'.",
+    )
+    ssl_mode: str | None = Field(
+        default=None,
+        description=f"SSL connection mode. One of: {', '.join(sorted(SSL_MODES))}.",
+    )
 
     @field_validator("username", "password", mode="before")
     @classmethod
@@ -46,25 +62,45 @@ class ProviderConfig(BaseModel):
 class ExtensionConfig(BaseModel):
     """Database extension configuration"""
 
-    name: str
+    name: str = Field(
+        description="PostgreSQL extension name as it appears in CREATE EXTENSION (e.g. 'uuid-ossp', 'pgcrypto')."
+    )
 
 
 class DatabaseConfig(BaseModel):
     """Database configuration"""
 
-    name: str
-    create: bool = True
-    extensions: list[ExtensionConfig] = Field(default_factory=list)
+    name: str = Field(description="Name of the database to manage.")
+    create: bool = Field(
+        default=True,
+        description="Create the database if it does not exist. Set to false to manage an existing database.",
+    )
+    extensions: list[ExtensionConfig] = Field(
+        default_factory=list,
+        description="PostgreSQL extensions to install in this database.",
+    )
 
 
 class PrivilegeConfig(BaseModel):
     """User privilege configuration"""
 
-    db: str
-    db_schema: str = "public"
-    readwrite: bool = False
-    readonly: bool = False
-    tables: list[str] = Field(default_factory=list)
+    db: str = Field(description="Target database name this privilege applies to.")
+    db_schema: str = Field(
+        default="public",
+        description="Schema within the database. Defaults to 'public'.",
+    )
+    readwrite: bool = Field(
+        default=False,
+        description="Grant SELECT, INSERT, UPDATE, DELETE on the specified tables. Mutually exclusive with readonly.",
+    )
+    readonly: bool = Field(
+        default=False,
+        description="Grant SELECT-only access on the specified tables. Mutually exclusive with readwrite.",
+    )
+    tables: list[str] = Field(
+        default_factory=list,
+        description="Tables to grant access to. Use ['ALL'] to target all current and future tables in the schema.",
+    )
 
     @model_validator(mode="after")
     def validate_access_flags(self) -> "PrivilegeConfig":
@@ -78,9 +114,13 @@ class PrivilegeConfig(BaseModel):
 class UserConfig(BaseModel):
     """User configuration"""
 
-    name: str
-    password: str
-    privileges: list[PrivilegeConfig] = Field(default_factory=list)
+    name: str = Field(description="PostgreSQL role/user name to create or manage.")
+    password: str = Field(
+        description="Password for the role. Supports ${ENV_VAR} substitution."
+    )
+    privileges: list[PrivilegeConfig] = Field(
+        default_factory=list, description="Database privileges to grant to this user."
+    )
 
     @field_validator("password", mode="before")
     @classmethod
@@ -98,16 +138,30 @@ class CustomSQLQuery(BaseModel):
     query_raw: str = Field(
         default="", description="Rendered SQL set in model_post_init."
     )
-    template_context: dict[str, Any] = Field(default_factory=dict)
+    template_context: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Key/value pairs passed as Jinja2 template variables.",
+    )
     loader_path: str | list[str] = Field(
-        default=".", description="Root path(s) for FileSystemLoader."
+        default=".",
+        description="Root path(s) for FileSystemLoader used to resolve {% include %} and {% extends %} in templates.",
     )
     inject_env: bool = Field(
-        default=True, description="Expose os.environ as {{ env.VAR }} in templates."
+        default=True,
+        description="When true, exposes os.environ as {{ env.VAR }} inside Jinja2 templates.",
     )
-    database: str = "postgres"
-    params: list[Any] = Field(default_factory=list)
-    name: str | None = None
+    database: str = Field(
+        default="postgres",
+        description="Database to connect to when executing this query.",
+    )
+    params: list[Any] = Field(
+        default_factory=list,
+        description="Positional parameters passed to the query (psycopg2 %s placeholders).",
+    )
+    name: str | None = Field(
+        default=None,
+        description="Optional label for this query, used in change reports and logs.",
+    )
 
     @field_validator("query", "database", mode="before")
     @classmethod
@@ -143,12 +197,19 @@ class CustomSQLQuery(BaseModel):
 class SQLConfig(BaseModel):
     """Complete SQL configuration schema"""
 
-    provider: ProviderConfig
+    provider: ProviderConfig = Field(description="Database server connection details.")
     database: list[DatabaseConfig] | dict[str, DatabaseConfig] = Field(
-        default_factory=list
+        default_factory=list,
+        description="Databases to create or manage on the provider.",
     )
-    users: list[UserConfig] = Field(default_factory=list)
-    custom_sql: list[CustomSQLQuery] = Field(default_factory=list)
+    users: list[UserConfig] = Field(
+        default_factory=list,
+        description="Roles/users to create and configure with their privileges.",
+    )
+    custom_sql: list[CustomSQLQuery] = Field(
+        default_factory=list,
+        description="Arbitrary SQL statements executed after databases, users, and privileges are applied.",
+    )
 
     @model_validator(mode="after")
     def normalize_database(self) -> "SQLConfig":

@@ -200,5 +200,35 @@ users:
     print(f"  4. cu sql execute -c {output}")
 
 
+@app.command("print-schema")
+def print_schema(
+    output: str = typer.Option(
+        "yaml",
+        "--output",
+        "-o",
+        help="Output format: yaml or json",
+    ),
+):
+    """
+    Print the JSON schema for the SQL configuration file.
+
+    Example:
+        cu sql print-schema
+        cu sql print-schema -o json
+    """
+    import json
+
+    from cloudutil.sql.modules.base import SQLConfig
+
+    schema = SQLConfig.model_json_schema()
+
+    if output == "json":
+        print(json.dumps(schema, indent=2))
+    else:
+        import yaml
+
+        print(yaml.dump(schema, default_flow_style=False, sort_keys=False))
+
+
 if __name__ == "__main__":
     app()

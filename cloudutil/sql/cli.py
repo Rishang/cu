@@ -1,5 +1,6 @@
 """CLI interface for SQL operations."""
 
+from collections import Counter
 from pathlib import Path
 
 import typer
@@ -13,17 +14,6 @@ app = typer.Typer(
     pretty_exceptions_enable=False,
     help="SQL database management commands",
 )
-
-SUPPORTED_PROVIDERS = ("postgres",)
-
-
-def _require_postgres(provider: str) -> None:
-    if provider.lower() not in SUPPORTED_PROVIDERS:
-        print(
-            f"[bold red]Error:[/bold red] Unsupported provider '{provider}'. "
-            f"Supported: {', '.join(SUPPORTED_PROVIDERS)}"
-        )
-        raise typer.Exit(1)
 
 
 @app.command("execute")
@@ -49,16 +39,12 @@ def execute_config(
         print(f"[bold blue]Loading configuration from:[/bold blue] {config_file}")
 
         changed, changes = apply_postgres_config(config_path=config_file)
-
-        creates = sum(1 for c in changes if c["operation"] == "create")
-        updates = sum(1 for c in changes if c["operation"] == "update")
-        skips = sum(1 for c in changes if c["operation"] == "skip")
-        executes = sum(1 for c in changes if c["operation"] == "execute")
+        n = Counter(c["operation"] for c in changes)
 
         print("[bold green]✓ Configuration executed successfully![/bold green]")
         print(
-            f"  Total: {len(changes)} | Created: {creates} | Updated: {updates} | "
-            f"Skipped: {skips} | Executed: {executes}"
+            f"  Total: {len(changes)} | Created: {n['create']} | Updated: {n['update']} | "
+            f"Skipped: {n['skip']} | Executed: {n['execute']}"
         )
         if not changed:
             print("[dim]  No changes — resources already in desired state.[/dim]")
@@ -103,16 +89,15 @@ def validate_config(
 
         print("[bold green]✓ Configuration is valid![/bold green]\n")
 
-        print("[bold]Provider:[/bold]")
         p = cfg.provider
-        ssl_info = ""
-        if p.ssl_mode:
-            ssl_info = f"  ssl_mode={p.ssl_mode}"
-        if p.cert:
-            ssl_info += f"  cert={p.cert}"
-        print(
-            f"  • {p.name} v{p.version}  {p.host}:{p.port}  user={p.username}{ssl_info}"
+        ssl = "".join(
+            [
+                f"  ssl_mode={p.ssl_mode}" if p.ssl_mode else "",
+                f"  cert={p.cert}" if p.cert else "",
+            ]
         )
+        print("[bold]Provider:[/bold]")
+        print(f"  • {p.name} v{p.version}  {p.host}:{p.port}  user={p.username}{ssl}")
 
         print("\n[bold]Databases:[/bold]")
         for db in cfg.database.values():
@@ -123,13 +108,13 @@ def validate_config(
         for user in cfg.users:
             print(f"  • {user.name}")
             for priv in user.privileges:
-                match priv:
-                    case _ if priv.readwrite:
-                        access = "READ/WRITE"
-                    case _ if priv.readonly:
-                        access = "READ-ONLY"
-                    case _:
-                        access = "NONE"
+                access = (
+                    "READ/WRITE"
+                    if priv.readwrite
+                    else "READ-ONLY"
+                    if priv.readonly
+                    else "NONE"
+                )
                 tables = "ALL" if "ALL" in priv.tables else f"{len(priv.tables)} tables"
                 print(f"    - {priv.db}.{priv.db_schema}: {access} on {tables}")
 

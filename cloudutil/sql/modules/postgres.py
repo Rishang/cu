@@ -50,28 +50,23 @@ class PostgreSQLProvider(BaseSQLProvider):
         self.conn_params: dict = {}
         self.changes: list[ChangeReport] = []
 
-    # =========================================================================
-    # CONNECTION
-    # =========================================================================
-
     def connect(self) -> None:
+        p = self.config.provider
         self.conn_params = {
-            "host": self.config.provider.host,
-            "port": self.config.provider.port,
-            "user": self.config.provider.username,
-            "password": self.config.provider.password,
+            "host": p.host,
+            "port": p.port,
+            "user": p.username,
+            "password": p.password,
         }
-        if self.config.provider.ssl_mode:
-            self.conn_params["sslmode"] = self.config.provider.ssl_mode
-        if self.config.provider.cert:
+        if p.ssl_mode:
+            self.conn_params["sslmode"] = p.ssl_mode
+        if p.cert:
             self.conn_params.setdefault("sslmode", "verify-full")
-            self.conn_params["sslrootcert"] = self.config.provider.cert
+            self.conn_params["sslrootcert"] = p.cert
 
         self._conn = psycopg2.connect(**self.conn_params, database="postgres")
         self._conn.autocommit = True
-        logger.info(
-            f"Connected to {self.config.provider.host}:{self.config.provider.port}"
-        )
+        logger.info(f"Connected to {p.host}:{p.port}")
 
     def disconnect(self) -> None:
         if self._conn:
@@ -94,10 +89,6 @@ class PostgreSQLProvider(BaseSQLProvider):
             finally:
                 conn.close()
 
-    # =========================================================================
-    # LOGGING
-    # =========================================================================
-
     def _log(
         self,
         operation: str,
@@ -117,90 +108,61 @@ class PostgreSQLProvider(BaseSQLProvider):
     def _section(self, name: str) -> None:
         logger.info(f"\n{'=' * 60}\n{name}\n{'=' * 60}")
 
-    # =========================================================================
-    # DATABASE
-    # =========================================================================
-
     def create_database(self, db_config: DatabaseConfig) -> None:
         if not db_config.create:
             return
+
+        name = db_config.name
+        owner = self.config.provider.username
+        db_id, owner_id = sql.Identifier(name), sql.Identifier(owner)
 
         with self._cursor() as cur:
             cur.execute(
                 "SELECT rolname FROM pg_roles WHERE oid = "
                 "(SELECT datdba FROM pg_database WHERE datname = %s)",
-                (db_config.name,),
+                (name,),
             )
             row = cur.fetchone()
 
-        match row:
-            case None:
-                with self._cursor() as cur:
-                    cur.execute(
-                        sql.SQL("CREATE DATABASE {} OWNER {}").format(
-                            sql.Identifier(db_config.name),
-                            sql.Identifier(self.config.provider.username),
-                        )
-                    )
-                self._log("create", "database", db_config.name)
-            case (current_owner,) if current_owner != self.config.provider.username:
-                with self._cursor() as cur:
-                    cur.execute(
-                        sql.SQL("ALTER DATABASE {} OWNER TO {}").format(
-                            sql.Identifier(db_config.name),
-                            sql.Identifier(self.config.provider.username),
-                        )
-                    )
-                self._log(
-                    "update",
-                    "database",
-                    db_config.name,
-                    {
-                        "owner": {
-                            "old": current_owner,
-                            "new": self.config.provider.username,
-                        }
-                    },
+            if row is None:
+                cur.execute(
+                    sql.SQL("CREATE DATABASE {} OWNER {}").format(db_id, owner_id)
                 )
-            case _:
-                self._log("skip", "database", db_config.name)
-
-    # =========================================================================
-    # EXTENSIONS
-    # =========================================================================
+                self._log("create", "database", name)
+            elif row[0] != owner:
+                cur.execute(
+                    sql.SQL("ALTER DATABASE {} OWNER TO {}").format(db_id, owner_id)
+                )
+                self._log(
+                    "update", "database", name, {"owner": {"old": row[0], "new": owner}}
+                )
+            else:
+                self._log("skip", "database", name)
 
     def install_extensions(
         self, db_name: str, extensions: list[ExtensionConfig]
     ) -> None:
         for ext in extensions:
+            ext_id = sql.Identifier(ext.name)
+            label = f"{db_name}.{ext.name}"
             with self._cursor(db_name) as cur:
                 cur.execute(
                     "SELECT 1 FROM pg_extension WHERE extname = %s", (ext.name,)
                 )
                 if cur.fetchone():
                     try:
-                        cur.execute(
-                            sql.SQL("ALTER EXTENSION {} UPDATE").format(
-                                sql.Identifier(ext.name)
-                            )
-                        )
-                        self._log("update", "extension", f"{db_name}.{ext.name}")
+                        cur.execute(sql.SQL("ALTER EXTENSION {} UPDATE").format(ext_id))
+                        self._log("update", "extension", label)
                     except Exception as e:
                         logger.warning(
                             f"ALTER EXTENSION {ext.name} UPDATE failed, skipping: {e}"
                         )
-                        self._log("skip", "extension", f"{db_name}.{ext.name}")
+                        self._log("skip", "extension", label)
                 else:
                     cur.execute(
-                        sql.SQL("CREATE EXTENSION IF NOT EXISTS {}").format(
-                            sql.Identifier(ext.name)
-                        )
+                        sql.SQL("CREATE EXTENSION IF NOT EXISTS {}").format(ext_id)
                     )
-                    self._log("create", "extension", f"{db_name}.{ext.name}")
-
-    # =========================================================================
-    # USERS
-    # =========================================================================
+                    self._log("create", "extension", label)
 
     def create_user(self, user_config: UserConfig) -> None:
         with self._cursor() as cur:
@@ -208,25 +170,24 @@ class PostgreSQLProvider(BaseSQLProvider):
                 "SELECT 1 FROM pg_roles WHERE rolname = %s", (user_config.name,)
             )
             exists = cur.fetchone() is not None
-            user_sql = sql.SQL(
-                "ALTER USER {} WITH PASSWORD %s"
-                if exists
-                else "CREATE USER {} WITH PASSWORD %s"
-            ).format(sql.Identifier(user_config.name))
-            cur.execute(user_sql, (user_config.password,))
+            verb = "ALTER USER" if exists else "CREATE USER"
+            cur.execute(
+                sql.SQL(f"{verb} {{}} WITH PASSWORD %s").format(
+                    sql.Identifier(user_config.name)
+                ),
+                (user_config.password,),
+            )
 
         op = "update" if exists else "create"
-        details = {"password": {"old": "***", "new": "***"}} if op == "update" else None
+        details = {"password": {"old": "***", "new": "***"}} if exists else None
         self._log(op, "user", user_config.name, details)
 
-    # =========================================================================
-    # PRIVILEGES
-    # =========================================================================
-
     def grant_privileges(self, user_name: str, priv: PrivilegeConfig) -> None:
+        label = f"{user_name}@{priv.db}.{priv.db_schema}"
         if not priv.readwrite and not priv.readonly:
-            self._log("skip", "privilege", f"{user_name}@{priv.db}.{priv.db_schema}")
+            self._log("skip", "privilege", label)
             return
+
         privs = "SELECT, INSERT, UPDATE, DELETE" if priv.readwrite else "SELECT"
         mode = "READ/WRITE" if priv.readwrite else "READ-ONLY"
         schema, user = sql.Identifier(priv.db_schema), sql.Identifier(user_name)
@@ -243,40 +204,30 @@ class PostgreSQLProvider(BaseSQLProvider):
                     sql.SQL("GRANT CREATE ON SCHEMA {} TO {}").format(schema, user)
                 )
 
-            match priv.tables:
-                case []:
-                    access = "CONNECT+USAGE only (no table grants)"
-                case tables if "ALL" in tables:
+            if not priv.tables:
+                access = "CONNECT+USAGE only (no table grants)"
+            elif "ALL" in priv.tables:
+                cur.execute(
+                    sql.SQL(
+                        f"GRANT {privs} ON ALL TABLES IN SCHEMA {{}} TO {{}}"
+                    ).format(schema, user)
+                )
+                cur.execute(
+                    sql.SQL(
+                        f"ALTER DEFAULT PRIVILEGES IN SCHEMA {{}} GRANT {privs} ON TABLES TO {{}}"
+                    ).format(schema, user)
+                )
+                access = f"{mode} (ALL)"
+            else:
+                for table in priv.tables:
                     cur.execute(
-                        sql.SQL(
-                            f"GRANT {privs} ON ALL TABLES IN SCHEMA {{}} TO {{}}"
-                        ).format(schema, user)
-                    )
-                    cur.execute(
-                        sql.SQL(
-                            f"ALTER DEFAULT PRIVILEGES IN SCHEMA {{}} GRANT {privs} ON TABLES TO {{}}"
-                        ).format(schema, user)
-                    )
-                    access = f"{mode} (ALL)"
-                case tables:
-                    for table in tables:
-                        cur.execute(
-                            sql.SQL(f"GRANT {privs} ON TABLE {{}}.{{}} TO {{}}").format(
-                                schema, sql.Identifier(table), user
-                            )
+                        sql.SQL(f"GRANT {privs} ON TABLE {{}}.{{}} TO {{}}").format(
+                            schema, sql.Identifier(table), user
                         )
-                    access = f"{mode} ({len(tables)} tables)"
+                    )
+                access = f"{mode} ({len(priv.tables)} tables)"
 
-        self._log(
-            "create",
-            "privilege",
-            f"{user_name}@{priv.db}.{priv.db_schema}",
-            {"access": access},
-        )
-
-    # =========================================================================
-    # CUSTOM SQL
-    # =========================================================================
+        self._log("create", "privilege", label, {"access": access})
 
     def execute_custom_sql(self, item: CustomSQLQuery, index: int) -> None:
         label = item.name or f"query[{index}]"
@@ -288,10 +239,6 @@ class PostgreSQLProvider(BaseSQLProvider):
                 f"{item.database}/{label}",
                 {"rowcount": cur.rowcount},
             )
-
-    # =========================================================================
-    # EXECUTE
-    # =========================================================================
 
     def execute(self) -> None:
         self.changes = []
@@ -329,11 +276,6 @@ class PostgreSQLProvider(BaseSQLProvider):
         logger.info("Complete")
 
 
-# =============================================================================
-# BUILDER
-# =============================================================================
-
-
 class PostgreSQLBuilder:
     """Fluent builder — load config from dict, YAML file, or YAML string."""
 
@@ -345,14 +287,10 @@ class PostgreSQLBuilder:
         return self
 
     def from_yaml(self, yaml_path: str | Path) -> "PostgreSQLBuilder":
-        path = Path(yaml_path)
-        if not path.exists():
-            raise FileNotFoundError(f"YAML file not found: {yaml_path}")
-        with open(path) as f:
-            data = yaml.safe_load(f)
-        if not isinstance(data, dict):
-            raise ValueError(f"YAML file is empty or not a mapping: {yaml_path}")
-        return self.from_dict(data)
+        path = Path(yaml_path).expanduser()
+        if not path.is_file():
+            raise FileNotFoundError(f"YAML file not found: {path}")
+        return self.from_yaml_string(path.read_text())
 
     def from_yaml_string(self, yaml_string: str) -> "PostgreSQLBuilder":
         data = yaml.safe_load(yaml_string)

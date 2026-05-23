@@ -8,6 +8,9 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from cloudutil.utils import resolve_env_variable
 
+SSL_MODES = {"disable", "allow", "prefer", "require", "verify-ca", "verify-full"}
+SSL_VERIFY_MODES = {"verify-ca", "verify-full"}
+
 
 class ProviderConfig(BaseModel):
     """Base provider configuration"""
@@ -28,24 +31,12 @@ class ProviderConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_ssl(self) -> "ProviderConfig":
-        valid_modes = {
-            "disable",
-            "allow",
-            "prefer",
-            "require",
-            "verify-ca",
-            "verify-full",
-        }
-        if self.ssl_mode is not None and self.ssl_mode not in valid_modes:
+        if self.ssl_mode and self.ssl_mode not in SSL_MODES:
             raise ValueError(
                 f"provider.ssl_mode '{self.ssl_mode}' is not valid. "
-                f"Choose from: {', '.join(sorted(valid_modes))}"
+                f"Choose from: {', '.join(sorted(SSL_MODES))}"
             )
-        if (
-            self.cert
-            and self.ssl_mode
-            and self.ssl_mode not in {"verify-ca", "verify-full"}
-        ):
+        if self.cert and self.ssl_mode and self.ssl_mode not in SSL_VERIFY_MODES:
             raise ValueError(
                 f"provider.cert requires ssl_mode 'verify-ca' or 'verify-full', got '{self.ssl_mode}'"
             )
@@ -118,19 +109,12 @@ class CustomSQLQuery(BaseModel):
     params: list[Any] = Field(default_factory=list)
     name: str | None = None
 
-    @field_validator("query", mode="before")
+    @field_validator("query", "database", mode="before")
     @classmethod
-    def query_must_be_nonblank(cls, v: Any) -> str:
+    def _nonblank(cls, v: Any, info) -> str:
         if isinstance(v, str) and v.strip():
             return v.strip()
-        raise ValueError("custom_sql.query must be a non-empty string")
-
-    @field_validator("database")
-    @classmethod
-    def database_not_blank(cls, v: str) -> str:
-        if not isinstance(v, str) or not v.strip():
-            raise ValueError("custom_sql.database must be a non-empty string")
-        return v.strip()
+        raise ValueError(f"custom_sql.{info.field_name} must be a non-empty string")
 
     def model_post_init(self, __context: Any) -> None:
         """Render the Jinja template and store result in query_raw."""

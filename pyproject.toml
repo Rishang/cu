@@ -26,6 +26,11 @@ build-backend = "setuptools.build_meta"
 [tool.uv]
 package = true
 
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
 [tool.setuptools.packages.find]
 include = ["cloudutil*"]
 

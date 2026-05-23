@@ -1,6 +1,7 @@
 import typer
 from .aws.cli import app as aws_app
 from .azure.cli import app as azure_app
+from .diff.cli import diff_cmd
 from .k8s.cli import app as k8s_app
 from .os_utils.cli import app as os_utils_app
 from .sql.cli import app as sql_app
@@ -21,6 +22,10 @@ app.add_typer(
     name="pwpush",
     help="Password Pusher commands ref: https://docs.pwpush.com/",
 )
+app.command(
+    "diff",
+    help="Semantic diff for structured config files (JSON, YAML, TOML).",
+)(diff_cmd)
 app.command(
     "task",
     help="Taskfile commands",

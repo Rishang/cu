@@ -44,8 +44,8 @@ cd /tmp && git clone https://github.com/Rishang/cloudutil.git && cd cloudutil &&
       - [Kubernetes ConfigMaps](#kubernetes-configmaps)
       - [Kubernetes Cluster Context Switching](#kubernetes-cluster-context-switching)
     - [OS Utils](#os-utils)
-      - [YAML Diff Checker](#yaml-diff-checker)
       - [Shell History](#shell-history)
+    - [Semantic Diff](#semantic-diff)
     - [Taskfile Operations](#taskfile-operations)
     - [Password Pusher Operations](#password-pusher-operations)
   - [🎯 Interactive Selection](#-interactive-selection)
@@ -64,7 +64,8 @@ cd /tmp && git clone https://github.com/Rishang/cloudutil.git && cd cloudutil &&
 - ⚡ **Profile & Region Support** - Seamless switching between AWS profiles and regions (where supported per command)
 - 🐍 **SQL Database Management** - Declarative PostgreSQL configuration via YAML (`validate`, `execute`, `init`)
 - 🎛️ **Kubernetes Operations** - Interactive Kubernetes secrets and ConfigMaps browsing via `kubectl`
-- 🧰 **OS Utils** - YAML diff checker for cross-file config comparisons using JMESPath
+- 🧰 **OS Utils** - Shell history search
+- 🔍 **Semantic Diff** - Structural diff of JSON, YAML, and TOML config files with git-diff-style output
 - 🗂️ **Taskfile Passthrough** - Run local Taskfile tasks via `cu task ...` with interactive terminal support
 - 🔐 **Password Pusher Integration** - Configure Password Pusher, share secrets, and generate strong passwords
 
@@ -115,6 +116,7 @@ The main entrypoint is `cu` (see `[project.scripts]` in `pyproject.toml`). Subco
 | `cu sql` | `cloudutil.sql.cli` | PostgreSQL config validate / execute / init |
 | `cu os` | `cloudutil.os_utils.cli` | YAML diff, shell history |
 | `cu k` | `cloudutil.k8s.cli` | Kubernetes secrets, ConfigMaps, context switch |
+| `cu diff` | `cloudutil.diff.cli` | Semantic diff of JSON, YAML, and TOML config files |
 | `cu pwpush` | `cloudutil.pwpush.cli` | Password Pusher |
 | `cu task` | `cloudutil.task.cli` | Passthrough to the `task` binary |
 
@@ -430,22 +432,112 @@ Notes:
 
 Utilities for local/dev workflows and config validation tasks.
 
-#### YAML Diff Checker
+#### Shell History
 
-Compare YAML nodes across files at a given JMESPath location and report:
-- missing keys on either side
-- value differences
-- matching keys
-- ignored keys based on patterns
-
-Default config file: `ydiff_config.yaml` in the current directory.
+Search shell history with fzf (supports zsh and bash).
 
 ```bash
-cu os ydiff
+cu os history
+```
 
-# Custom config
-cu os ydiff --config ./cloudutil/os_utils/example.yaml
-cu os ydiff -c ./my-ydiff.yaml
+### Semantic Diff
+
+Compare JSON, YAML, and TOML config files structurally — not line by line. Output groups changes by top-level key with a git-diff-style layout and a summary table at the end.
+
+#### Compare two files inline
+
+```bash
+cu diff -f prod.yaml -f stage.yaml
+```
+
+**Example output:**
+```
+--- a/prod.yaml  (main)
++++ b/stage.yaml  (main)
+
+@@ app @@  (2 changes)
+~  port:     8080 → 9090
+~  version:  '1.0.0' → '2.0.0'
+
+@@ database @@  (3 changes)
+~  host:       'db.prod.internal' → 'db.stage.internal'
+~  pool_size:  10 → 3
++  ssl:        True
+
+ +  added   -  removed   ~  changed
+────────────────────────────────────
+        1            0            7
+```
+
+Branch name is shown automatically when the files are inside a git repository.
+
+#### Compare using a config file
+
+For multiple pairs or reusable ignore rules, use a config file:
+
+```bash
+cu diff --config diff_config.yaml
+```
+
+**Config format (`diff_config.yaml`):**
+
+```yaml
+global_ignore_keys:
+  - metadata
+  - status
+
+global_ignore_patterns:
+  - dev
+  - TEST
+
+diffs:
+  - files:
+      - config/prod.yaml
+      - config/stage.yaml
+    ignore_keys:
+      - data
+
+  - files:
+      - service-a.toml
+      - service-b.toml
+```
+
+#### Ignore rules
+
+| Flag | Config field | Behaviour |
+|------|-------------|-----------|
+| `--ignore-key <key>` | `ignore_keys` / `global_ignore_keys` | Suppress any diff entry whose path contains this key segment (exact match, any depth) |
+| `--ignore-pattern <str>` | `ignore_patterns` / `global_ignore_patterns` | Suppress any diff entry where old or new value contains this substring (case-insensitive) |
+
+```bash
+# Inline flags
+cu diff -f prod.yaml -f stage.yaml \
+  --ignore-key metadata \
+  --ignore-key status \
+  --ignore-pattern dev
+```
+
+#### Output formats
+
+```bash
+# Default: git-diff-style unified output
+cu diff -f a.yaml -f b.yaml
+
+# Rich table: symbol | path | old | new
+cu diff -f a.yaml -f b.yaml --format table
+
+# Machine-readable JSON (stdout)
+cu diff -f a.yaml -f b.yaml --format json
+```
+
+Exit code is `0` when no differences are found, `1` otherwise — suitable for use in CI pipelines.
+
+#### JMESPath YAML diff (formerly `cu os ydiff`)
+
+Compare YAML nodes at a specific JMESPath location across multiple files. Useful for validating that config values match across environments.
+
+```bash
+cu diff --ydiff ydiff_config.yaml
 ```
 
 **Config format (`ydiff_config.yaml`):**
@@ -455,7 +547,7 @@ ydiff:
   - jsmec: "configMap"
     files:
       - app-v1: "./values/main.yaml"
-      # $branch is resolved to the current git branch name for that file path.
+      # $branch resolves to the current git branch name for that file path
       - $branch: "./values/feature.yaml"
     ignore_patterns:
       - test
@@ -463,18 +555,10 @@ ydiff:
 ```
 
 Notes:
-- `jsmec` is the JMESPath expression used to extract the node to compare.
+- `jsmec` is the JMESPath expression to extract the node to compare.
 - Every item under `files` is a single-key mapping: `{alias: path}`.
 - At least 2 files are required per check.
-- You can use `$branch` as an alias to auto-resolve the current git branch name for that file path.
-
-#### Shell History
-
-Search shell history with fzf (supports zsh and bash).
-
-```bash
-cu os history
-```
+- `$branch` auto-resolves to the current git branch name for that file path.
 
 ### Taskfile Operations
 
@@ -538,8 +622,9 @@ All commands use `fzf` for interactive selection, providing:
 | `cu aws` | `login`, `ssm-parameters`, `ec2-ssm`, `secrets`, `decode-message` |
 | `cu az` | `secrets` |
 | `cu sql` | `execute`, `validate`, `init` |
-| `cu os` | `ydiff`, `history` |
+| `cu os` | `history` |
 | `cu k` | `secrets`, `configmaps`, `ctx` |
+| `cu diff` | `-f <a> -f <b>`, `--config <config.yaml>`, `--ydiff <config.yaml>` |
 | `cu pwpush` | `config`, `send`, `list-active`, `pwgen` |
 | `cu task` | forwards to `task -t <taskfile> -d <dir> ...` |
 

@@ -151,18 +151,29 @@ def diff_cmd(
         print(_yaml.dump(schema, default_flow_style=False, sort_keys=False))
         raise typer.Exit(0)
 
+    # When no inputs are specified, auto-detect a default config file in cwd:
+    # cu_diff.yml -> normal diff config; cu_ydiff.yml -> --ydiff config.
+    # Prefer cu_diff.yml when both exist (one command exits the process, so only one runs).
+    if not files and not config and not ydiff:
+        default_diff = Path("cu_diff.yml")
+        default_ydiff = Path("cu_ydiff.yml")
+        if default_diff.exists():
+            config = default_diff
+        elif default_ydiff.exists():
+            ydiff = default_ydiff
+        else:
+            _err(
+                "Specify -f <file> -f <file>, --config <config.yaml>, or --ydiff <ydiff_config.yaml>. "
+                "Or create cu_diff.yml / cu_ydiff.yml in the current directory."
+            )
+            raise typer.Exit(1)
+
     if ydiff:
         _ydiff.run(ydiff)
         return
 
     if files and config:
         _err("Use either -f flags or a config file argument, not both.")
-        raise typer.Exit(1)
-
-    if not files and not config:
-        _err(
-            "Specify -f <file> -f <file>, --config <config.yaml>, or --ydiff <ydiff_config.yaml>."
-        )
         raise typer.Exit(1)
 
     # --unified beats --format; fall back to config.format or table default

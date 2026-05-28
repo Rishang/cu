@@ -1,0 +1,161 @@
+# SQL Database Configuration Example
+# This file demonstrates all features of the SQL module.
+# Use ${ENV_VAR} syntax to reference environment variables for sensitive data.
+
+# ============================================================================
+# PROVIDER CONFIGURATION
+# ============================================================================
+provider:
+  name: postgres
+  version: 17
+  host: ${DB_HOST}             # or literal: localhost
+  port: 5432
+  username: ${POSTGRES_USER}   # or literal: postgres
+  password: ${POSTGRES_PASSWORD}
+  # SSL options (both optional):
+  #   ssl_mode: require          # disable | allow | prefer | require | verify-ca | verify-full
+  #   cert: /etc/ssl/pg-ca.crt  # path to CA cert; requires ssl_mode verify-ca or verify-full
+
+# ============================================================================
+# DATABASE CONFIGURATION
+# ============================================================================
+database:
+  # Production application database
+  - name: myapp
+    create: true
+    extensions:
+      - name: uuid-ossp          # UUID generation
+      - name: pgcrypto           # Encryption functions
+      - name: pg_trgm            # Full-text search trigram indexing
+
+  # Analytics database
+  - name: analytics
+    create: true
+    extensions:
+      - name: pg_stat_statements # Query performance monitoring
+
+  # Pre-existing database — create: false means it must already exist
+  - name: legacy_db
+    create: false
+
+# ============================================================================
+# USER MANAGEMENT
+# ============================================================================
+# Rules:
+#   - readwrite: true  → SELECT, INSERT, UPDATE, DELETE + CREATE on schema
+#   - readonly: true   → SELECT only
+#   - readwrite and readonly cannot both be true (validation error)
+#   - tables: [ALL]    → grant on all current and future tables in the schema
+#   - tables: []       → CONNECT + USAGE granted, no table-level permissions
+users:
+  # Application service account — full read/write on all tables
+  - name: app_service
+    password: ${APP_SERVICE_PASSWORD}
+    privileges:
+      - db: myapp
+        db_schema: public
+        readwrite: true
+        tables:
+          - ALL
+
+  # Read-only analytics user — crosses two databases
+  - name: analytics_user
+    password: ${ANALYTICS_PASSWORD}
+    privileges:
+      - db: myapp
+        db_schema: public
+        readonly: true
+        tables:
+          - ALL
+
+      - db: analytics
+        db_schema: public
+        readonly: true
+        tables:
+          - ALL
+
+  # Narrow write access — specific tables only
+  - name: audit_logger
+    password: ${AUDIT_PASSWORD}
+    privileges:
+      - db: myapp
+        db_schema: public
+        readwrite: true
+        tables:
+          - audit_logs
+          - events
+
+  # Reporting user — read access to selected tables
+  - name: reports_user
+    password: ${REPORTS_PASSWORD}
+    privileges:
+      - db: myapp
+        db_schema: public
+        readonly: true
+        tables:
+          - users
+          - sessions
+          - products
+          - orders
+
+# ============================================================================
+# CUSTOM SQL  (optional — runs after databases, extensions, users, privileges)
+# ============================================================================
+custom_sql:
+  # Plain DDL — idempotent CREATE
+  - name: schema_migrations_table
+    database: myapp
+    query: |
+      CREATE TABLE IF NOT EXISTS public._schema_migrations (
+        id          SERIAL PRIMARY KEY,
+        version     TEXT        NOT NULL UNIQUE,
+        applied_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+
+  # Parameterized DML — use params: for untrusted / variable input
+  - name: seed_settings
+    database: myapp
+    query: |
+      INSERT INTO public.app_settings (key, value)
+      VALUES (%s, %s)
+      ON CONFLICT (key) DO NOTHING
+    params:
+      - maintenance_mode
+      - "false"
+
+  # Jinja template — interpolate values from template_context
+  - name: create_index
+    database: myapp
+    query: "CREATE INDEX IF NOT EXISTS idx_{{ table }}_id ON public.{{ table }} (id);"
+    template_context:
+      table: users
+
+  # Jinja + environment variable injection (inject_env: true by default)
+  - name: record_deploy_env
+    database: myapp
+    query: |
+      INSERT INTO public._schema_migrations (version)
+      VALUES ('{{ env.APP_VERSION }}')
+      ON CONFLICT (version) DO NOTHING
+
+  # Include an external SQL file via loader_path
+  # - name: from_file
+  #   database: myapp
+  #   loader_path: ./sql/fragments
+  #   query: "{% include 'bootstrap.sql' %}"
+
+# ============================================================================
+# ENVIRONMENT VARIABLES REQUIRED
+# ============================================================================
+# export DB_HOST=prod-db.example.com
+# export POSTGRES_USER=postgres
+# export POSTGRES_PASSWORD=your_admin_password
+# export APP_SERVICE_PASSWORD=app_service_password
+# export ANALYTICS_PASSWORD=analytics_password
+# export AUDIT_PASSWORD=audit_password
+# export REPORTS_PASSWORD=reports_password
+# export APP_VERSION=1.2.3   # used by the custom_sql Jinja example above
+#
+# Then:
+#   cu sql validate example.yaml
+#   cu sql execute --config-file example.yaml

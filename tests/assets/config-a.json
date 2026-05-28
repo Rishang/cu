@@ -1,0 +1,20 @@
+{
+  "app": {
+    "name": "myservice",
+    "version": "1.0.0",
+    "port": 8080
+  },
+  "database": {
+    "host": "db.prod.internal",
+    "port": 5432,
+    "pool_size": 10
+  },
+  "features": {
+    "dark_mode": true,
+    "beta": false
+  },
+  "metadata": {
+    "created_by": "admin",
+    "created_at": "2024-01-01"
+  }
+}

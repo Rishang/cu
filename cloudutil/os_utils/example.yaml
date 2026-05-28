@@ -1,0 +1,8 @@
+ydiff:
+- jsmec: 'configMap'
+  files:
+    - $branch: <path>/values.yaml
+    - $branch: <path>/values.yaml
+  ignore_patterns:
+    - 'test'
+    - 'dev'

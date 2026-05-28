@@ -1,0 +1,18 @@
+app:
+  name: myservice
+  version: "2.0.0"
+  port: 9090
+
+database:
+  host: db.stage.internal
+  port: 5432
+  pool_size: 3
+  ssl: true
+
+features:
+  dark_mode: true
+  beta: true
+
+metadata:
+  created_by: devops
+  created_at: "2025-01-01"

@@ -1,0 +1,25 @@
+provider:
+  name: postgres
+  version: 17
+  host: localhost
+  port: 5432
+  cert: null
+  username: postgres
+  password: postgres
+
+database:
+  dna:
+    name: dna
+    create: true
+
+
+users:
+  - name: john
+    password: postgres
+    privileges:
+      - db: dna
+        db_schema: public
+        readwrite: true
+        readonly: false
+        tables:
+          - ALL

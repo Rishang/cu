@@ -6,9 +6,11 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+import hcl2
 import yaml
 
-SUPPORTED_EXTENSIONS = {".json", ".yaml", ".yml", ".toml"}
+SUPPORTED_EXTENSIONS = {".json", ".yaml", ".yml", ".toml", ".tf", ".hcl", ".tfvars"}
+HCL_EXTENSIONS = {".tf", ".hcl", ".tfvars"}
 
 
 def get_git_branch(path: str | Path) -> str | None:
@@ -47,6 +49,9 @@ def load_file(path: str | Path) -> Any:
                     return tomllib.load(fh)
             case ".json":
                 return json.loads(p.read_text(encoding="utf-8"))
+            case ".tf" | ".hcl" | ".tfvars":
+                with p.open("r", encoding="utf-8") as fh:
+                    return hcl2.load(fh)
             case _:  # .yaml / .yml
                 return yaml.safe_load(p.read_text(encoding="utf-8"))
     except tomllib.TOMLDecodeError as exc:
@@ -55,3 +60,5 @@ def load_file(path: str | Path) -> Any:
         raise ValueError(f"Invalid JSON in {path!r}: {exc}") from exc
     except yaml.YAMLError as exc:
         raise ValueError(f"Invalid YAML in {path!r}: {exc}") from exc
+    except Exception as exc:
+        raise ValueError(f"Invalid HCL in {path!r}: {exc}") from exc

@@ -11,7 +11,7 @@ from rich.rule import Rule
 from cloudutil.utils import console
 from .engine import compute_diff
 from .filters import apply_filters
-from .loader import get_git_branch, load_file
+from .loader import HCL_EXTENSIONS, get_git_branch, load_file
 from .models import Diff, DiffConfig
 from .renderer import render
 from . import ydiff as _ydiff
@@ -68,6 +68,10 @@ def diff_cmd(
         Format,
         typer.Option("--format", "-o", help="Output format.", show_default=True),
     ] = Format.unified,
+    table: Annotated[
+        bool,
+        typer.Option("--table", help="Shorthand for --format table.", is_flag=True),
+    ] = False,
     color: Annotated[
         bool,
         typer.Option("--color/--no-color", help="Enable/disable colored output."),
@@ -138,10 +142,13 @@ def diff_cmd(
         )
         raise typer.Exit(1)
 
+    effective_format = Format.table if table else format
     if files:
-        _run_inline(files, ignore_key or [], ignore_pattern or [], format, color)
+        _run_inline(
+            files, ignore_key or [], ignore_pattern or [], effective_format, color
+        )
     else:
-        _run_config(config, format, color)  # type: ignore[arg-type]
+        _run_config(config, effective_format, color)  # type: ignore[arg-type]
 
 
 def _run_inline(
@@ -226,6 +233,10 @@ def _execute_diff(entry: Diff, cfg: DiffConfig, format: Format, color: bool) -> 
         local_ignore_patterns=entry.ignore_patterns,
     )
 
+    hcl_pair = (
+        Path(file_a).suffix.lower() in HCL_EXTENSIONS
+        and Path(file_b).suffix.lower() in HCL_EXTENSIONS
+    )
     render(
         filtered,
         format=format,
@@ -234,5 +245,6 @@ def _execute_diff(entry: Diff, cfg: DiffConfig, format: Format, color: bool) -> 
         branch_a=get_git_branch(file_a),
         branch_b=get_git_branch(file_b),
         color=color,
+        value_style="hcl" if hcl_pair else "default",
     )
     return len(filtered)

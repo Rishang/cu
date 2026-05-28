@@ -2,15 +2,32 @@
 
 import json as _json
 from collections import defaultdict
-from typing import Any, Literal
+from collections.abc import Callable
+from typing import Any, Literal, NamedTuple
 
 from rich import box
 from rich.table import Table
+from rich.text import Text
 
 from cloudutil.utils import console
 from .engine import DiffEntry
 
 OutputFormat = Literal["unified", "table", "json"]
+ValueStyle = Literal["default", "hcl"]
+Fmt = Callable[[Any], str]
+
+ADD, DEL, ARROW, NOTE, LABEL = "green", "red", "dim", "dim italic", "bold"
+
+
+class _Line(NamedTuple):
+    """A single rendered diff line: symbol, key, and styled value segments."""
+
+    sym: str
+    sym_style: str
+    key: str
+    key_style: str
+    segs: list[tuple[str, str]]  # (text, rich-style) — empty style = default
+
 
 # symbol, color  — used by both table and unified renderers
 _KIND: dict[str, tuple[str, str]] = {
@@ -29,14 +46,16 @@ def render(
     branch_a: str | None = None,
     branch_b: str | None = None,
     color: bool = True,
+    value_style: ValueStyle = "default",
 ) -> None:
+    fmt: Fmt = _fmt_hcl if value_style == "hcl" else _fmt
     match format:
         case "table":
-            _render_table(entries, file_a, file_b)
+            _render_table(entries, file_a, file_b, fmt)
         case "json":
             _render_json(entries, file_a, file_b, branch_a, branch_b)
         case _:
-            _render_unified(entries, file_a, file_b, branch_a, branch_b, color)
+            _render_unified(entries, file_a, file_b, branch_a, branch_b, color, fmt)
 
 
 # ── Unified ───────────────────────────────────────────────────────────────────
@@ -49,96 +68,157 @@ def _render_unified(
     branch_a: str | None,
     branch_b: str | None,
     color: bool,
+    fmt: Fmt,
 ) -> None:
-    def branch(name: str | None) -> str:
-        return f"  [dim]({name})[/dim]" if name else ""
-
-    console.print(f"[bold red]--- a/{file_a}[/bold red]{branch(branch_a)}")
-    console.print(f"[bold green]+++ b/{file_b}[/bold green]{branch(branch_b)}")
+    _print_header(file_a, file_b, branch_a, branch_b, color)
 
     if not entries:
         console.print()
-        console.print("[bold green]✓  No differences[/bold green]")
+        console.print(
+            "[bold green]✓  No differences[/bold green]"
+            if color
+            else "✓  No differences"
+        )
         return
 
     groups: dict[str, list[DiffEntry]] = defaultdict(list)
     for entry in sorted(entries, key=lambda e: e.path_str):
         groups[str(entry.path[0]) if entry.path else "(root)"].append(entry)
 
-    all_lines: list[tuple[str, str, str]] = []
-    sym_style = {"+": "green", "-": "red", "~": "yellow"}
+    added = removed = changed = 0
 
     for section, group in sorted(groups.items()):
-        n = len(group)
-        label = f"({n} change{'s' if n > 1 else ''})"
+        lines = _build_lines(group, section, fmt)
+        n = len(lines)
+        label = f"({n} change{'s' if n != 1 else ''})"
         console.print()
+        if color:
+            console.print(f"[bold cyan]@@ {section} @@[/bold cyan]  [dim]{label}[/dim]")
+        else:
+            console.print(f"@@ {section} @@  {label}")
+
+        pad = max((len(ln.key) for ln in lines if ln.key), default=0)
+        for ln in lines:
+            if ln.sym == "+":
+                added += 1
+            elif ln.sym == "-":
+                removed += 1
+            else:
+                changed += 1
+            _print_line(ln, pad, color)
+
+    console.print()
+    console.print(_summary_table(added, removed, changed))
+
+
+def _print_header(
+    file_a: str, file_b: str, branch_a: str | None, branch_b: str | None, color: bool
+) -> None:
+    def tag(branch: str | None) -> str:
+        return f"  ({branch})" if branch else ""
+
+    if color:
+        console.print(f"[bold red]--- a/{file_a}[/bold red][dim]{tag(branch_a)}[/dim]")
         console.print(
-            f"[bold cyan]@@ {section} @@[/bold cyan]  [dim]{label}[/dim]"
-            if color
-            else f"@@ {section} @@  {label}"
+            f"[bold green]+++ b/{file_b}[/bold green][dim]{tag(branch_b)}[/dim]"
         )
+    else:
+        console.print(f"--- a/{file_a}{tag(branch_a)}")
+        console.print(f"+++ b/{file_b}{tag(branch_b)}")
 
-        lines = _build_lines(group, section)
-        pad = max((len(k) for _, k, _ in lines if k), default=0)
 
-        for sym, key, val in lines:
-            style = sym_style[sym]
-            col = f"{key}:".ljust(pad + 1) if key else ""
-            text = f"{sym}  {col}  {val}" if col else f"{sym}  {val}"
-            console.print(f"[{style}]{text}[/{style}]" if color else text)
+def _print_line(ln: _Line, pad: int, color: bool) -> None:
+    if not color:
+        col = f"{ln.key}:".ljust(pad + 1) if ln.key else ""
+        plain = "".join(t for t, _ in ln.segs)
+        console.print(f"{ln.sym}  {col}  {plain}" if col else f"{ln.sym}  {plain}")
+        return
 
-        all_lines.extend(lines)
+    text = Text()
+    text.append(f"{ln.sym}  ", style=ln.sym_style)
+    if ln.key:
+        text.append(f"{ln.key}:".ljust(pad + 1), style=ln.key_style)
+        text.append("  ")
+    for t, style in ln.segs:
+        text.append(t, style=style)
+    console.print(text)
 
-    added = sum(1 for s, _, _ in all_lines if s == "+")
-    removed = sum(1 for s, _, _ in all_lines if s == "-")
-    changed = sum(1 for s, _, _ in all_lines if s == "~")
 
-    summary = Table(
+def _summary_table(added: int, removed: int, changed: int) -> Table:
+    t = Table(
         box=box.SIMPLE_HEAD,
         show_header=True,
         header_style="dim",
-        padding=(0, 1),
+        padding=(0, 2),
         expand=False,
         show_edge=False,
     )
-    summary.add_column("+  added", style="green", justify="right")
-    summary.add_column("-  removed", style="red", justify="right")
-    summary.add_column("~  changed", style="yellow", justify="right")
-    summary.add_row(str(added), str(removed), str(changed))
-    console.print()
-    console.print(summary)
+    t.add_column("+  added", style="bold green", justify="right")
+    t.add_column("-  removed", style="bold red", justify="right")
+    t.add_column("~  changed", style="bold yellow", justify="right")
+    t.add_row(str(added), str(removed), str(changed))
+    return t
 
 
-def _build_lines(group: list[DiffEntry], section: str) -> list[tuple[str, str, str]]:
-    """Convert a group of DiffEntry objects into (symbol, key, value) display tuples."""
-    lines: list[tuple[str, str, str]] = []
+def _build_lines(group: list[DiffEntry], section: str, fmt: Fmt) -> list[_Line]:
+    """Convert DiffEntry objects into styled _Line tuples."""
+    lines: list[_Line] = []
     for entry in group:
         rel = _rel_key(entry.path_str, section)
         match entry.kind:
             case "added":
                 lines.extend(
-                    ("+", k, _fmt(v)) for k, v in _expand(rel, entry.new_value)
+                    _added_line(k, v, fmt) for k, v in _expand(rel, entry.new_value)
                 )
             case "removed":
                 lines.extend(
-                    ("-", k, _fmt(v)) for k, v in _expand(rel, entry.old_value)
+                    _removed_line(k, v, fmt) for k, v in _expand(rel, entry.old_value)
                 )
             case "changed":
-                old_v, new_v = entry.old_value, entry.new_value
-                if _is_scalar(old_v) and _is_scalar(new_v):
-                    lines.append(("~", rel, f"{_fmt(old_v)} → {_fmt(new_v)}"))
-                else:
-                    lines.append(("-", rel, _fmt(old_v)))
-                    lines.append(("+", rel, _fmt(new_v)))
+                lines.extend(
+                    _changed_lines(
+                        rel, entry.old_value, entry.new_value, note="", fmt=fmt
+                    )
+                )
             case "type_changed":
-                old_v, new_v = entry.old_value, entry.new_value
-                note = f"  ({type(old_v).__name__} → {type(new_v).__name__})"
-                if _is_scalar(old_v) and _is_scalar(new_v):
-                    lines.append(("~", rel, f"{_fmt(old_v)} → {_fmt(new_v)}{note}"))
-                else:
-                    lines.append(("-", rel, _fmt(old_v) + note))
-                    lines.append(("+", rel, _fmt(new_v)))
+                note = f"  ({type(entry.old_value).__name__} → {type(entry.new_value).__name__})"
+                lines.extend(
+                    _changed_lines(
+                        rel, entry.old_value, entry.new_value, note=note, fmt=fmt
+                    )
+                )
     return lines
+
+
+def _added_line(key: str, value: Any, fmt: Fmt) -> _Line:
+    return _Line("+", ADD, key, ADD, [(fmt(value), ADD)])
+
+
+def _removed_line(key: str, value: Any, fmt: Fmt) -> _Line:
+    return _Line("-", DEL, key, DEL, [(fmt(value), DEL)])
+
+
+def _changed_lines(
+    key: str, old_v: Any, new_v: Any, note: str, fmt: Fmt
+) -> list[_Line]:
+    if _is_scalar(old_v) and _is_scalar(new_v):
+        segs: list[tuple[str, str]] = [
+            (fmt(old_v), DEL),
+            (" → ", ARROW),
+            (fmt(new_v), ADD),
+        ]
+        if note:
+            segs.append((note, NOTE))
+        return [_Line("~", "yellow", key, LABEL, segs)]
+
+    # Non-scalar: emit a removed line + an added line, with the note attached to the removed side.
+    rem_segs: list[tuple[str, str]] = [(fmt(old_v), DEL)]
+    if note:
+        rem_segs.append((note, NOTE))
+    return [
+        _Line("-", DEL, key, DEL, rem_segs),
+        _Line("+", ADD, key, ADD, [(fmt(new_v), ADD)]),
+    ]
 
 
 def _rel_key(path_str: str, section: str) -> str:
@@ -176,24 +256,33 @@ def _is_scalar(v: Any) -> bool:
 # ── Table ─────────────────────────────────────────────────────────────────────
 
 
-def _render_table(entries: list[DiffEntry], file_a: str, file_b: str) -> None:
+def _render_table(entries: list[DiffEntry], file_a: str, file_b: str, fmt: Fmt) -> None:
     if not entries:
         console.print("[bold green]✓  No differences[/bold green]")
         return
 
     t = Table(
-        box=box.ROUNDED, show_header=True, header_style="bold cyan", padding=(0, 2)
+        box=box.ROUNDED,
+        show_header=True,
+        header_style="bold cyan",
+        padding=(0, 2),
+        row_styles=["", "on grey7"],
     )
-    t.add_column("", style="bold", width=3, no_wrap=True)
-    t.add_column("Path", style="cyan", no_wrap=True)
-    t.add_column(f"{file_a} (old)", style="red")
-    t.add_column(f"{file_b} (new)", style="green")
+    t.add_column("", width=3, no_wrap=True, justify="center")
+    t.add_column("Path", style="bold", no_wrap=True)
+    t.add_column(Text(f"− {file_a}", style="bold red"))
+    t.add_column(Text(f"+ {file_b}", style="bold green"))
 
+    dash = Text("—", style="dim")
     for entry in sorted(entries, key=lambda e: e.path_str):
         sym, style = _KIND[entry.kind]
-        old = "[dim]—[/dim]" if entry.kind == "added" else _fmt(entry.old_value)
-        new = "[dim]—[/dim]" if entry.kind == "removed" else _fmt(entry.new_value)
-        t.add_row(f"[{style}]{sym}[/{style}]", entry.path_str, old, new)
+        old = dash if entry.kind == "added" else Text(fmt(entry.old_value), style="red")
+        new = (
+            dash
+            if entry.kind == "removed"
+            else Text(fmt(entry.new_value), style="green")
+        )
+        t.add_row(Text(sym, style=f"bold {style}"), entry.path_str, old, new)
 
     console.print(t)
 
@@ -233,3 +322,34 @@ def _fmt(value: Any) -> str:
     if isinstance(value, (dict, list)):
         return _json.dumps(value, default=str, ensure_ascii=False)
     return repr(value)
+
+
+def _fmt_hcl(value: Any) -> str:
+    """Format a value as an HCL literal for display.
+
+    python-hcl2 preserves string literals with their HCL double-quote chars
+    embedded (e.g. 'us-east-1' in HCL is stored as '"us-east-1"' in Python).
+    Pass those through unchanged; only bare strings get wrapped in quotes.
+    """
+    if value is None:
+        return "null"
+    if isinstance(value, bool):  # must precede int — bool is a subclass of int
+        return "true" if value else "false"
+    if isinstance(value, str):
+        # hcl2 preserves HCL string literals with embedded quote chars
+        if len(value) >= 2 and value[0] == '"' and value[-1] == '"':
+            return value
+        return f'"{value}"'
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, list):
+        items = ", ".join(_fmt_hcl(v) for v in value)
+        return f"[{items}]"
+    if isinstance(value, dict):
+        pairs = " ".join(
+            f"{k} = {_fmt_hcl(v)}"
+            for k, v in sorted(value.items())
+            if k != "__is_block__"  # hcl2 metadata marker — not a real attribute
+        )
+        return "{ " + pairs + " }" if pairs else "{}"
+    return str(value)

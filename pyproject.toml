@@ -16,6 +16,7 @@ dependencies = [
     "psycopg2-binary>=2.9.9",
     "azure-identity>=1.15.0",
     "azure-keyvault-secrets>=4.8.0",
+    "python-hcl2>=4.3",
 ]
 
 

@@ -23,9 +23,7 @@ class Format(str, Enum):
     json = "json"
 
 
-_FORMAT_DEFAULT = (
-    Format.unified
-)  # fallback when neither CLI nor config specifies format
+_FORMAT_DEFAULT = Format.table  # fallback when neither CLI nor config specifies format
 
 
 class SchemaTarget(str, Enum):
@@ -73,9 +71,14 @@ def diff_cmd(
         Format | None,
         typer.Option("--format", "-o", help="Output format.", show_default=False),
     ] = None,
-    table: Annotated[
+    unified: Annotated[
         bool,
-        typer.Option("--table", help="Shorthand for --format table.", is_flag=True),
+        typer.Option(
+            "--unified",
+            "-u",
+            help="Shorthand for --format unified (git-diff style).",
+            is_flag=True,
+        ),
     ] = False,
     color: Annotated[
         bool,
@@ -128,10 +131,12 @@ def diff_cmd(
 
     \b
     Common flags:
+      --unified / -u             git-diff style output instead of table
       --ignore-key metadata      suppress paths containing 'metadata'
       --ignore-pattern dev       suppress values containing 'dev'
-      --format table             table layout
       --format json              machine-readable JSON
+      -q spec.replicas           show only diffs under a path prefix
+      -q "[?kind=='changed']"    JMESPath filter on diff entries
     """
     if print_schema is not None:
         import yaml as _yaml
@@ -160,8 +165,8 @@ def diff_cmd(
         )
         raise typer.Exit(1)
 
-    # --table beats --format; for inline runs fall back to unified if neither given
-    cli_format = Format.table if table else format
+    # --unified beats --format; fall back to config.format or table default
+    cli_format = Format.unified if unified else format
     if files:
         _run_inline(
             files,

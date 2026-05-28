@@ -64,7 +64,7 @@ class DiffConfig(BaseModel):
     format: Format = Field(
         default="table",
         description="Output format for all pairs: unified (git-diff style), table, or json. "
-        "Overridden by --format / --table on the command line.",
+        "Overridden by --format / --unified on the command line.",
     )
     query: str | None = Field(
         default=None,

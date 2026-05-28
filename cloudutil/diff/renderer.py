@@ -51,7 +51,7 @@ def render(
     fmt: Fmt = _fmt_hcl if value_style == "hcl" else _fmt
     match format:
         case "table":
-            _render_table(entries, file_a, file_b, fmt)
+            _render_table(entries, file_a, file_b, branch_a, branch_b, fmt)
         case "json":
             _render_json(entries, file_a, file_b, branch_a, branch_b)
         case _:
@@ -256,10 +256,24 @@ def _is_scalar(v: Any) -> bool:
 # ── Table ─────────────────────────────────────────────────────────────────────
 
 
-def _render_table(entries: list[DiffEntry], file_a: str, file_b: str, fmt: Fmt) -> None:
+def _render_table(
+    entries: list[DiffEntry],
+    file_a: str,
+    file_b: str,
+    branch_a: str | None,
+    branch_b: str | None,
+    fmt: Fmt,
+) -> None:
     if not entries:
         console.print("[bold green]✓  No differences[/bold green]")
         return
+
+    def col_label(prefix: str, name: str, branch: str | None) -> Text:
+        t = Text()
+        t.append(f"{prefix} {name}", style="bold")
+        if branch:
+            t.append(f" ({branch})", style="dim")
+        return t
 
     t = Table(
         box=box.ROUNDED,
@@ -270,12 +284,19 @@ def _render_table(entries: list[DiffEntry], file_a: str, file_b: str, fmt: Fmt) 
     )
     t.add_column("", width=3, no_wrap=True, justify="center")
     t.add_column("Path", style="bold", no_wrap=True)
-    t.add_column(Text(f"− {file_a}", style="bold red"))
-    t.add_column(Text(f"+ {file_b}", style="bold green"))
+    t.add_column(col_label("−", file_a, branch_a), style="red")
+    t.add_column(col_label("+", file_b, branch_b), style="green")
 
+    added = removed = changed = 0
     dash = Text("—", style="dim")
     for entry in sorted(entries, key=lambda e: e.path_str):
         sym, style = _KIND[entry.kind]
+        if entry.kind == "added":
+            added += 1
+        elif entry.kind == "removed":
+            removed += 1
+        else:
+            changed += 1
         old = dash if entry.kind == "added" else Text(fmt(entry.old_value), style="red")
         new = (
             dash
@@ -285,6 +306,8 @@ def _render_table(entries: list[DiffEntry], file_a: str, file_b: str, fmt: Fmt) 
         t.add_row(Text(sym, style=f"bold {style}"), entry.path_str, old, new)
 
     console.print(t)
+    console.print()
+    console.print(_summary_table(added, removed, changed))
 
 
 # ── JSON ──────────────────────────────────────────────────────────────────────

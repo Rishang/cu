@@ -24,11 +24,17 @@ class DiffEntry:
         for seg in self.path:
             if isinstance(seg, int):
                 parts.append(f"[{seg}]")
-            elif parts:
-                parts.append(f".{seg}")
             else:
-                parts.append(seg)
+                s = _clean_seg(seg)
+                parts.append(f".{s}" if parts else s)
         return "".join(parts) or "(root)"
+
+
+def _clean_seg(seg: str) -> str:
+    """Strip embedded double-quote chars that hcl2 adds to block label keys."""
+    if len(seg) >= 2 and seg[0] == '"' and seg[-1] == '"':
+        return seg[1:-1]
+    return seg
 
 
 def compute_diff(a: Any, b: Any) -> list[DiffEntry]:

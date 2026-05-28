@@ -10,7 +10,7 @@ from rich.rule import Rule
 
 from cloudutil.utils import console
 from .engine import compute_diff
-from .filters import apply_filters
+from .filters import apply_filters, apply_query
 from .loader import HCL_EXTENSIONS, get_git_branch, load_file
 from .models import Diff, DiffConfig
 from .renderer import render
@@ -21,6 +21,11 @@ class Format(str, Enum):
     unified = "unified"
     table = "table"
     json = "json"
+
+
+_FORMAT_DEFAULT = (
+    Format.unified
+)  # fallback when neither CLI nor config specifies format
 
 
 class SchemaTarget(str, Enum):
@@ -65,9 +70,9 @@ def diff_cmd(
         ),
     ] = None,
     format: Annotated[
-        Format,
-        typer.Option("--format", "-o", help="Output format.", show_default=True),
-    ] = Format.unified,
+        Format | None,
+        typer.Option("--format", "-o", help="Output format.", show_default=False),
+    ] = None,
     table: Annotated[
         bool,
         typer.Option("--table", help="Shorthand for --format table.", is_flag=True),
@@ -81,6 +86,19 @@ def diff_cmd(
         typer.Option(
             "--ydiff",
             help="JMESPath-based YAML diff config file (replaces `cu os ydiff`).",
+            show_default=False,
+        ),
+    ] = None,
+    query: Annotated[
+        str | None,
+        typer.Option(
+            "-q",
+            "--query",
+            help=(
+                "JMESPath query to filter diff entries. "
+                "Each entry exposes: path, kind, old, new. "
+                "Example: -q \"[?kind=='changed']\""
+            ),
             show_default=False,
         ),
     ] = None,
@@ -142,13 +160,19 @@ def diff_cmd(
         )
         raise typer.Exit(1)
 
-    effective_format = Format.table if table else format
+    # --table beats --format; for inline runs fall back to unified if neither given
+    cli_format = Format.table if table else format
     if files:
         _run_inline(
-            files, ignore_key or [], ignore_pattern or [], effective_format, color
+            files,
+            ignore_key or [],
+            ignore_pattern or [],
+            cli_format or _FORMAT_DEFAULT,
+            color,
+            query,
         )
     else:
-        _run_config(config, effective_format, color)  # type: ignore[arg-type]
+        _run_config(config, cli_format, color, query)  # type: ignore[arg-type]
 
 
 def _run_inline(
@@ -157,6 +181,7 @@ def _run_inline(
     ignore_patterns: list[str],
     format: Format,
     color: bool,
+    query: str | None,
 ) -> None:
     if len(files) != 2:
         _err(f"Exactly 2 -f/--file values required, got {len(files)}.")
@@ -168,10 +193,12 @@ def _run_inline(
         ignore_patterns=ignore_patterns,
     )
     cfg = DiffConfig(diffs=[entry])
-    raise typer.Exit(1 if _execute_diff(entry, cfg, format, color) else 0)
+    raise typer.Exit(1 if _execute_diff(entry, cfg, format, color, query) else 0)
 
 
-def _run_config(config: Path, format: Format, color: bool) -> None:
+def _run_config(
+    config: Path, cli_format: Format | None, color: bool, cli_query: str | None
+) -> None:
     if not config.exists():
         _err(f"Config file not found: {config}")
         raise typer.Exit(1)
@@ -183,8 +210,13 @@ def _run_config(config: Path, format: Format, color: bool) -> None:
         _err(str(exc))
         raise typer.Exit(1)
 
+    # CLI flags override config; config overrides built-in default
+    effective_format = Format(cli_format or cfg.format)
+
     total, n = 0, len(cfg.diffs)
     for i, entry in enumerate(cfg.diffs, 1):
+        # Query precedence: CLI -q > per-pair config query > global config query
+        effective_query = cli_query or entry.query or cfg.query
         a, b = Path(entry.files[0]).name, Path(entry.files[1]).name
         console.print(
             Rule(
@@ -192,7 +224,7 @@ def _run_config(config: Path, format: Format, color: bool) -> None:
                 style="cyan",
             )
         )
-        total += _execute_diff(entry, cfg, format, color)
+        total += _execute_diff(entry, cfg, effective_format, color, effective_query)
         console.print()
 
     if n > 1:
@@ -214,7 +246,9 @@ def _run_config(config: Path, format: Format, color: bool) -> None:
     raise typer.Exit(1 if total else 0)
 
 
-def _execute_diff(entry: Diff, cfg: DiffConfig, format: Format, color: bool) -> int:
+def _execute_diff(
+    entry: Diff, cfg: DiffConfig, format: Format, color: bool, query: str | None
+) -> int:
     """Load, diff, filter, and render one pair. Returns the number of differences."""
     file_a, file_b = entry.files[0], entry.files[1]
 
@@ -232,6 +266,13 @@ def _execute_diff(entry: Diff, cfg: DiffConfig, format: Format, color: bool) -> 
         global_ignore_patterns=cfg.global_ignore_patterns,
         local_ignore_patterns=entry.ignore_patterns,
     )
+
+    if query:
+        try:
+            filtered = apply_query(filtered, query)
+        except ValueError as exc:
+            _err(str(exc))
+            raise typer.Exit(1)
 
     hcl_pair = (
         Path(file_a).suffix.lower() in HCL_EXTENSIONS

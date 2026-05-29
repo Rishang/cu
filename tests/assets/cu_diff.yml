@@ -1,0 +1,10 @@
+format: table
+global_ignore_patterns:
+  - dev
+  - stage
+  - prod
+diffs:
+  - files:
+      - app-dev.yaml
+      - app-stage.yaml
+      - app-prod.yaml

@@ -1,0 +1,7 @@
+app:
+  name: myapp
+  replicas: 5
+  host: prod-api.example.com
+database:
+  host: prod-db.internal
+  pool_size: 20

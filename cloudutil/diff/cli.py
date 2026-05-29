@@ -1,6 +1,7 @@
 """CLI entry point for `cu diff` — semantic diff of structured config files."""
 
 from enum import Enum
+from itertools import combinations as _combinations
 from pathlib import Path
 from typing import Annotated
 
@@ -12,7 +13,7 @@ from cloudutil.utils import console
 from .engine import compute_diff
 from .filters import apply_filters, apply_query
 from .loader import HCL_EXTENSIONS, get_git_branch, load_file
-from .models import Diff, DiffConfig
+from .schemas import Diff, DiffConfig
 from .renderer import render
 from . import ydiff as _ydiff
 
@@ -160,10 +161,14 @@ def diff_cmd(
         raise typer.Exit(1)
 
     if not files and not config:
-        _err(
-            "Specify -f <file> -f <file>, --config <config.yaml>, or --ydiff <ydiff_config.yaml>."
-        )
-        raise typer.Exit(1)
+        default = Path("cu_diff.yml")
+        if default.exists():
+            config = default
+        else:
+            _err(
+                "Specify -f <file> -f <file>, --config <cu_diff.yml>, or --ydiff <ydiff_config.yaml>."
+            )
+            raise typer.Exit(1)
 
     # --unified beats --format; fall back to config.format or table default
     cli_format = Format.unified if unified else format
@@ -180,6 +185,19 @@ def diff_cmd(
         _run_config(config, cli_format, color, query)  # type: ignore[arg-type]
 
 
+def _print_pair_header(
+    rule_text: str, file_a: str, file_b: str, display_a: str, display_b: str
+) -> None:
+    branch_a = get_git_branch(file_a)
+    branch_b = get_git_branch(file_b)
+    tag_a = f"  [dim]({branch_a})[/dim]" if branch_a else ""
+    tag_b = f"  [dim]({branch_b})[/dim]" if branch_b else ""
+    console.print(Rule(f"[bold]{rule_text}[/bold]", style="cyan"))
+    console.print(f"  [red]−[/red]  [cyan]{display_a}[/cyan]{tag_a}")
+    console.print(f"  [green]+[/green]  [cyan]{display_b}[/cyan]{tag_b}")
+    console.print()
+
+
 def _run_inline(
     files: list[Path],
     ignore_keys: list[str],
@@ -188,17 +206,43 @@ def _run_inline(
     color: bool,
     query: str | None,
 ) -> None:
-    if len(files) != 2:
-        _err(f"Exactly 2 -f/--file values required, got {len(files)}.")
+    if len(files) < 2:
+        _err(f"At least 2 -f/--file values required, got {len(files)}.")
         raise typer.Exit(1)
 
-    entry = Diff(
-        files=[str(f) for f in files],
-        ignore_keys=ignore_keys,
-        ignore_patterns=ignore_patterns,
-    )
-    cfg = DiffConfig(diffs=[entry])
-    raise typer.Exit(1 if _execute_diff(entry, cfg, format, color, query) else 0)
+    pairs = list(_combinations(files, 2))
+    n = len(pairs)
+    total = 0
+
+    for j, (fa, fb) in enumerate(pairs, 1):
+        rule_text = f"PAIR {j}/{n}" if n > 1 else "DIFF"
+        _print_pair_header(rule_text, str(fa), str(fb), str(fa), str(fb))
+        entry = Diff(
+            files=[str(fa), str(fb)],
+            ignore_keys=ignore_keys,
+            ignore_patterns=ignore_patterns,
+        )
+        cfg = DiffConfig(diffs=[entry])
+        total += _execute_diff(entry, cfg, format, color, query)
+        console.print()
+
+    if n > 1:
+        if total == 0:
+            console.print(
+                Rule(
+                    "[bold green]✅  ALL DIFFS PASSED — no differences detected.[/bold green]",
+                    style="green",
+                )
+            )
+        else:
+            console.print(
+                Rule(
+                    f"[bold red]❌  {total} difference(s) across {n} pair(s).[/bold red]",
+                    style="red",
+                )
+            )
+
+    raise typer.Exit(1 if total else 0)
 
 
 def _run_config(
@@ -218,19 +262,32 @@ def _run_config(
     # CLI flags override config; config overrides built-in default
     effective_format = Format(cli_format or cfg.format)
 
+    config_dir = config.parent.resolve()
     total, n = 0, len(cfg.diffs)
     for i, entry in enumerate(cfg.diffs, 1):
         # Query precedence: CLI -q > per-pair config query > global config query
         effective_query = cli_query or entry.query or cfg.query
-        a, b = Path(entry.files[0]).name, Path(entry.files[1]).name
-        console.print(
-            Rule(
-                f"[bold]DIFF {i}/{n}[/bold]  [dim]·[/dim]  [cyan]{a}[/cyan]  [dim]↔[/dim]  [cyan]{b}[/cyan]",
-                style="cyan",
+        # Resolve file paths relative to the config file's directory
+        resolved = [str((config_dir / f).resolve()) for f in entry.files]
+        pairs = list(_combinations(range(len(resolved)), 2))
+        n_pairs = len(pairs)
+        for j, (ia, ib) in enumerate(pairs, 1):
+            file_a, file_b = resolved[ia], resolved[ib]
+            cfg_a, cfg_b = entry.files[ia], entry.files[ib]
+            pair_label = f" PAIR {j}/{n_pairs}" if n_pairs > 1 else ""
+            _print_pair_header(
+                f"DIFF {i}/{n}{pair_label}", file_a, file_b, cfg_a, cfg_b
             )
-        )
-        total += _execute_diff(entry, cfg, effective_format, color, effective_query)
-        console.print()
+            pair_entry = Diff(
+                files=[file_a, file_b],
+                ignore_keys=entry.ignore_keys,
+                ignore_patterns=entry.ignore_patterns,
+                query=entry.query,
+            )
+            total += _execute_diff(
+                pair_entry, cfg, effective_format, color, effective_query
+            )
+            console.print()
 
     if n > 1:
         if total == 0:
@@ -264,7 +321,7 @@ def _execute_diff(
         _err(str(exc))
         raise typer.Exit(1)
 
-    filtered = apply_filters(
+    filtered, ignored = apply_filters(
         compute_diff(data_a, data_b),
         global_ignore_keys=cfg.global_ignore_keys,
         local_ignore_keys=entry.ignore_keys,
@@ -275,6 +332,7 @@ def _execute_diff(
     if query:
         try:
             filtered = apply_query(filtered, query)
+            ignored = apply_query(ignored, query)
         except ValueError as exc:
             _err(str(exc))
             raise typer.Exit(1)
@@ -292,5 +350,6 @@ def _execute_diff(
         branch_b=get_git_branch(file_b),
         color=color,
         value_style="hcl" if hcl_pair else "default",
+        ignored=ignored,
     )
     return len(filtered)

@@ -1,0 +1,7 @@
+app:
+  name: myapp
+  replicas: 2
+  host: stage-api.example.com
+database:
+  host: stage-db.internal
+  pool_size: 5

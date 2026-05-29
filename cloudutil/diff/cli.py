@@ -110,7 +110,12 @@ def diff_cmd(
         SchemaTarget | None,
         typer.Option(
             "--print-schema",
-            help="Print config JSON schema and exit. Choices: diff (--config format), ydiff (--ydiff format).",
+            help=(
+                "Print config JSON schema as YAML and exit. "
+                "Choices: diff (cu_diff.yml format), ydiff (--ydiff format). "
+                "Useful for AI/CLI agents to understand and generate valid config files: "
+                "pipe the output to an LLM with your file list to auto-generate cu_diff.yml."
+            ),
             show_default=False,
         ),
     ] = None,

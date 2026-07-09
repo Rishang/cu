@@ -100,8 +100,11 @@ class FzfView(ABC, Generic[T]):
         """Render selected domain objects as a single JSON payload."""
         payload: dict[str, str] = {}
         for item in items:
-            payload.update(self.display_item(item))
-        self.print_json(payload)
+            item_payload = self.display_item(item)
+            if item_payload is not None:
+                payload.update(item_payload)
+        if payload:
+            self.print_json(payload)
 
     # ── Optional hooks ────────────────────────────────────────────────────────
 

@@ -47,18 +47,30 @@ def render(
     branch_b: str | None = None,
     color: bool = True,
     value_style: ValueStyle = "default",
+    ignored: list[DiffEntry] | None = None,
 ) -> None:
     fmt: Fmt = _fmt_hcl if value_style == "hcl" else _fmt
     match format:
         case "table":
-            _render_table(entries, file_a, file_b, branch_a, branch_b, fmt)
+            _render_table(entries, file_a, file_b, branch_a, branch_b, fmt, ignored)
         case "json":
             _render_json(entries, file_a, file_b, branch_a, branch_b)
         case _:
-            _render_unified(entries, file_a, file_b, branch_a, branch_b, color, fmt)
+            _render_unified(
+                entries, file_a, file_b, branch_a, branch_b, color, fmt, ignored
+            )
 
 
 # ── Unified ───────────────────────────────────────────────────────────────────
+
+
+def _render_ignored_section(ignored: list[DiffEntry]) -> None:
+    if not ignored:
+        return
+    console.print(f"[dim]⊘  Ignored ({len(ignored)}) — matched ignore rules[/dim]")
+    for e in sorted(ignored, key=lambda e: e.path_str):
+        console.print(f"[dim]   ~ {e.path_str}[/dim]")
+    console.print()
 
 
 def _render_unified(
@@ -69,6 +81,7 @@ def _render_unified(
     branch_b: str | None,
     color: bool,
     fmt: Fmt,
+    ignored: list[DiffEntry] | None = None,
 ) -> None:
     _print_header(file_a, file_b, branch_a, branch_b, color)
 
@@ -79,6 +92,7 @@ def _render_unified(
             if color
             else "✓  No differences"
         )
+        _render_ignored_section(ignored or [])
         return
 
     groups: dict[str, list[DiffEntry]] = defaultdict(list)
@@ -107,6 +121,7 @@ def _render_unified(
                 changed += 1
             _print_line(ln, pad, color)
 
+    _render_ignored_section(ignored or [])
     console.print()
     console.print(_summary_table(added, removed, changed))
 
@@ -263,14 +278,18 @@ def _render_table(
     branch_a: str | None,
     branch_b: str | None,
     fmt: Fmt,
+    ignored: list[DiffEntry] | None = None,
 ) -> None:
     if not entries:
+        _render_ignored_section(ignored or [])
         console.print("[bold green]✓  No differences[/bold green]")
         return
 
     def col_label(prefix: str, name: str, branch: str | None) -> Text:
+        color = "red" if prefix == "−" else "green"
         t = Text()
-        t.append(f"{prefix} {name}", style="bold")
+        t.append(prefix, style=f"bold {color}")
+        t.append(f" {name}", style="bold")
         if branch:
             t.append(f" ({branch})", style="dim")
         return t
@@ -305,6 +324,7 @@ def _render_table(
         )
         t.add_row(Text(sym, style=f"bold {style}"), entry.path_str, old, new)
 
+    _render_ignored_section(ignored or [])
     console.print(t)
     console.print()
     console.print(_summary_table(added, removed, changed))

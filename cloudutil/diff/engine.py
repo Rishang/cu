@@ -47,9 +47,14 @@ def _is_numeric(v: Any) -> bool:
 
 
 def _diff(a: Any, b: Any, path: list[str | int]) -> list[DiffEntry]:
-    # Type mismatch — treat int/float as compatible numerics
-    if type(a) is not type(b) and not (_is_numeric(a) and _is_numeric(b)):
-        return [DiffEntry(path=path, kind="type_changed", old_value=a, new_value=b)]
+    # Type mismatch — treat int/float as compatible; treat scalar/string as equal if same repr
+    if type(a) is not type(b):
+        if _is_numeric(a) and _is_numeric(b):
+            pass  # fall through to value comparison
+        elif str(a) == str(b):
+            return []  # e.g. int 2 vs str '2' — same value, different YAML quoting
+        else:
+            return [DiffEntry(path=path, kind="type_changed", old_value=a, new_value=b)]
 
     if isinstance(a, dict):
         entries = []

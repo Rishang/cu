@@ -92,8 +92,14 @@ def test_path_str_with_list_index():
 # ── Type changes ───────────────────────────────────────────────────────────────
 
 
-def test_type_changed_string_to_int():
-    entries = compute_diff({"port": "8080"}, {"port": 8080})
+def test_type_changed_string_to_int_same_value():
+    """'8080' vs 8080 — same repr, different YAML quoting — treated as equal."""
+    assert compute_diff({"port": "8080"}, {"port": 8080}) == []
+
+
+def test_type_changed_string_to_int_different_value():
+    """'80' vs 8080 — different values, type_changed."""
+    entries = compute_diff({"port": "80"}, {"port": 8080})
     assert len(entries) == 1
     assert entries[0].kind == "type_changed"
 

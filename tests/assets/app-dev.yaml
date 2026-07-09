@@ -1,0 +1,7 @@
+app:
+  name: myapp
+  replicas: 1
+  host: dev-api.example.com
+database:
+  host: dev-db.internal
+  pool_size: 2

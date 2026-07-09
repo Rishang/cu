@@ -65,7 +65,7 @@ cd /tmp && git clone https://github.com/Rishang/cloudutil.git && cd cloudutil &&
 - 🐍 **SQL Database Management** - Declarative PostgreSQL configuration via YAML (`validate`, `execute`, `init`)
 - 🎛️ **Kubernetes Operations** - Interactive Kubernetes secrets and ConfigMaps browsing via `kubectl`
 - 🧰 **OS Utils** - Shell history search
-- 🔍 **Semantic Diff** - Structural diff of JSON, YAML, and TOML config files with git-diff-style output
+- 🔍 **Semantic Diff** - Structural diff of JSON, YAML, TOML, and HCL/Terraform config files. Table or unified output, N-way comparison, smart env-pattern ignore, JMESPath filtering, and auto-detection of `cu_diff.yml`
 - 🗂️ **Taskfile Passthrough** - Run local Taskfile tasks via `cu task ...` with interactive terminal support
 - 🔐 **Password Pusher Integration** - Configure Password Pusher, share secrets, and generate strong passwords
 
@@ -442,7 +442,13 @@ cu os history
 
 ### Semantic Diff
 
-Compare JSON, YAML, and TOML config files structurally — not line by line. Output groups changes by top-level key with a git-diff-style layout and a summary table at the end.
+Compare JSON, YAML, TOML, and HCL/Terraform config files structurally — not line by line. Default output is a rich table; use `--unified` / `-u` for git-diff style.
+
+Supported file types: `.json`, `.yaml`, `.yml`, `.toml`, `.tf`, `.hcl`, `.tfvars`
+
+#### Auto-detection
+
+Place a `cu_diff.yml` in your working directory and run `cu diff` with no flags — it is picked up automatically.
 
 #### Compare two files inline
 
@@ -450,126 +456,149 @@ Compare JSON, YAML, and TOML config files structurally — not line by line. Out
 cu diff -f prod.yaml -f stage.yaml
 ```
 
-**Example output:**
+**Example output (table — default):**
 ```
---- a/prod.yaml  (main)
-+++ b/stage.yaml  (main)
+── DIFF ────────────────────────────────────────────────
+  −  prod.yaml  (main)
+  +  stage.yaml  (main)
 
-@@ app @@  (2 changes)
-~  port:     8080 → 9090
-~  version:  '1.0.0' → '2.0.0'
+╭───┬──────────────────┬─────────────────────┬─────────────────────╮
+│   │  Path            │  − prod.yaml (main) │  + stage.yaml (main)│
+├───┼──────────────────┼─────────────────────┼─────────────────────┤
+│ ~ │  app.port        │  8080               │  9090               │
+│ ~ │  app.version     │  '1.0.0'            │  '2.0.0'            │
+│ + │  database.ssl    │  —                  │  True               │
+╰───┴──────────────────┴─────────────────────┴─────────────────────╯
 
-@@ database @@  (3 changes)
-~  host:       'db.prod.internal' → 'db.stage.internal'
-~  pool_size:  10 → 3
-+  ssl:        True
-
- +  added   -  removed   ~  changed
-────────────────────────────────────
-        1            0            7
+  +  added   -  removed   ~  changed
+──────────────────────────────────────
+        1            0            2
 ```
 
-Branch name is shown automatically when the files are inside a git repository.
-
-#### Compare using a config file
-
-For multiple pairs or reusable ignore rules, use a config file:
+Switch to git-diff style with `--unified` / `-u`:
 
 ```bash
-cu diff --config diff_config.yaml
+cu diff -f prod.yaml -f stage.yaml --unified
 ```
 
-**Config format (`diff_config.yaml`):**
+#### N-way comparison
 
-```yaml
-global_ignore_keys:
-  - metadata
-  - status
+Pass 3 or more `-f` flags — all N-choose-2 pairs are compared automatically:
 
-global_ignore_patterns:
-  - dev
-  - TEST
+```bash
+cu diff -f dev.yaml -f stage.yaml -f prod.yaml
+# compares: dev↔stage, dev↔prod, stage↔prod
+```
 
-diffs:
-  - files:
-      - config/prod.yaml
-      - config/stage.yaml
-    ignore_keys:
-      - data
+#### Filter with a path prefix or JMESPath (`-q`)
 
-  - files:
-      - service-a.toml
-      - service-b.toml
+```bash
+# Show only diffs under configmap.data
+cu diff -f qa/values.yaml -f prod/values.yaml -q "configmap.data"
+
+# JMESPath expression
+cu diff -f a.yaml -f b.yaml -q "[?kind=='changed']"
 ```
 
 #### Ignore rules
 
 | Flag | Config field | Behaviour |
 |------|-------------|-----------|
-| `--ignore-key <key>` | `ignore_keys` / `global_ignore_keys` | Suppress any diff entry whose path contains this key segment (exact match, any depth) |
-| `--ignore-pattern <str>` | `ignore_patterns` / `global_ignore_patterns` | Suppress any diff entry where old or new value contains this substring (case-insensitive) |
+| `--ignore-key <seg>` | `ignore_keys` / `global_ignore_keys` | Suppress any path whose segments contain this key (exact match, any depth) |
+| `--ignore-pattern <tok>` | `ignore_patterns` / `global_ignore_patterns` | Strip these tokens from both values, then compare — suppressed if equal |
+
+`--ignore-pattern` uses word-boundary regex and accepts comma-separated values:
 
 ```bash
-# Inline flags
-cu diff -f prod.yaml -f stage.yaml \
+# Suppress env-name-only differences (qa-server vs prod-server → -server = -server)
+cu diff -f qa/values.yaml -f prod/values.yaml \
   --ignore-key metadata \
-  --ignore-key status \
-  --ignore-pattern dev
+  --ignore-pattern "qa,prod,stage"
 ```
+
+Suppressed entries are shown in an **⊘ Ignored** block above the table so you can verify what was filtered.
 
 #### Output formats
 
 ```bash
-# Default: git-diff-style unified output
+# Table (default)
 cu diff -f a.yaml -f b.yaml
 
-# Rich table: symbol | path | old | new
-cu diff -f a.yaml -f b.yaml --format table
+# Git-diff style
+cu diff -f a.yaml -f b.yaml --unified
+cu diff -f a.yaml -f b.yaml -u
 
-# Machine-readable JSON (stdout)
+# Machine-readable JSON
+cu diff -f a.yaml -f b.yaml -o json
 cu diff -f a.yaml -f b.yaml --format json
 ```
 
-Exit code is `0` when no differences are found, `1` otherwise — suitable for use in CI pipelines.
+Exit code is `0` when no differences are found, `1` otherwise — suitable for CI pipelines.
 
-#### JMESPath YAML diff (formerly `cu os ydiff`)
+#### Compare using a config file
 
-Compare YAML nodes at a specific JMESPath location across multiple files. Useful for validating that config values match across environments.
+For multiple pairs, global ignore rules, or reusable queries, use a `cu_diff.yml` config file:
+
+```bash
+cu diff --config cu_diff.yml
+# or just: cu diff   (auto-detects cu_diff.yml in CWD)
+```
+
+**Config format (`cu_diff.yml`):**
+
+```yaml
+format: table                        # default output format (table | unified | json)
+query: configmap.data                # global path prefix or JMESPath filter
+global_ignore_keys:
+  - metadata
+  - status
+global_ignore_patterns: "qa,prod,stage"   # comma-separated string or YAML list
+
+diffs:
+  # Two-way diff
+  - files:
+      - k8s-manifest/helm/admin/values.yaml
+      - k8s-manifest-bak/helm/admin/values.yaml
+    query: configmap.data            # per-pair override
+
+  # N-way diff — all 3 pairs compared automatically
+  - files:
+      - helm/app/values-dev.yaml
+      - helm/app/values-stage.yaml
+      - helm/app/values-prod.yaml
+    ignore_keys:
+      - timestamp
+
+  # Terraform / HCL
+  - files:
+      - infra/main.tf
+      - infra-bak/main.tf
+```
+
+Config file paths are resolved relative to the config file's location, so you can run `cu diff` from any directory.
+
+#### JMESPath YAML diff (`--ydiff`)
+
+Legacy mode — compare YAML nodes at a specific JMESPath path across multiple files:
 
 ```bash
 cu diff --ydiff ydiff_config.yaml
 ```
 
-**Config format (`ydiff_config.yaml`):**
-
-```yaml
-ydiff:
-  - jsmec: "configMap"
-    files:
-      - app-v1: "./values/main.yaml"
-      # $branch resolves to the current git branch name for that file path
-      - $branch: "./values/feature.yaml"
-    ignore_patterns:
-      - test
-      - dev
-```
-
-Notes:
-- `jsmec` is the JMESPath expression to extract the node to compare.
-- Every item under `files` is a single-key mapping: `{alias: path}`.
-- At least 2 files are required per check.
-- `$branch` auto-resolves to the current git branch name for that file path.
-
 #### Print config schema
 
-Print the full JSON schema (as YAML) for either config format:
+```bash
+cu diff --print-schema diff    # schema for cu_diff.yml
+cu diff --print-schema ydiff   # schema for --ydiff config
+```
+
+The schema output is designed to be fed to an AI/CLI agent. Pipe it along with your file list to auto-generate a valid `cu_diff.yml`:
 
 ```bash
-# Schema for --config diff config file
-cu diff --print-schema diff
-
-# Schema for --ydiff config file
-cu diff --print-schema ydiff
+# Let an LLM generate cu_diff.yml for your files
+cu diff --print-schema diff | llm "Generate a cu_diff.yml for these helm values files: \
+  k8s/helm/*/values-qa.yaml vs k8s/helm/*/values-prod.yaml \
+  with ignore_patterns: qa,prod"
 ```
 
 ### Taskfile Operations

@@ -1,11 +1,58 @@
 """Filter diff entries using ignore_keys, ignore_patterns, and JMESPath query rules."""
 
+import re
 from collections.abc import Sequence
+from difflib import SequenceMatcher
 from typing import Any
 
 import jmespath
 
 from .engine import DiffEntry
+
+_SIMILARITY_THRESHOLD = 1.0
+
+
+def _compile_patterns(patterns: list[str]) -> list[re.Pattern]:
+    flat = [tok.strip() for p in patterns for tok in p.split(",") if tok.strip()]
+    return [
+        re.compile(
+            r"(?<![A-Za-z0-9])" + re.escape(p) + r"(?![A-Za-z0-9])", re.IGNORECASE
+        )
+        for p in flat
+    ]
+
+
+def _any_match(compiled: list[re.Pattern], value: Any) -> bool:
+    if value is None:
+        return False
+    return any(p.search(str(value)) for p in compiled)
+
+
+def _strip_all(compiled: list[re.Pattern], value: str) -> str:
+    for p in compiled:
+        value = p.sub("", value)
+    return value
+
+
+def _smart_ignore(compiled: list[re.Pattern], entry: DiffEntry) -> bool:
+    """Strip all pattern tokens from both values; ignore the entry if what remains is identical.
+
+    Logic: remove the env/marker keywords from both sides, then compare. If the
+    only difference between the two values was the marker token, the stripped
+    strings are equal → ignore. If something else differs → keep as a real diff.
+
+    Added/removed entries have no counterpart to compare against, so they are
+    always kept.
+    """
+    if entry.kind in ("added", "removed"):
+        return False
+    s1 = _strip_all(
+        compiled, str(entry.old_value) if entry.old_value is not None else ""
+    )
+    s2 = _strip_all(
+        compiled, str(entry.new_value) if entry.new_value is not None else ""
+    )
+    return SequenceMatcher(None, s1, s2).ratio() >= _SIMILARITY_THRESHOLD
 
 
 def apply_filters(
@@ -14,22 +61,29 @@ def apply_filters(
     local_ignore_keys: Sequence[str] = (),
     global_ignore_patterns: Sequence[str] = (),
     local_ignore_patterns: Sequence[str] = (),
-) -> list[DiffEntry]:
-    """Return entries that pass all ignore rules.
+) -> tuple[list[DiffEntry], list[DiffEntry]]:
+    """Return (kept, ignored) entry lists after applying all ignore rules.
 
     Filtering order (first match suppresses the entry):
       1. global_ignore_keys  2. local_ignore_keys
       3. global_ignore_patterns  4. local_ignore_patterns
     """
     keys = (*global_ignore_keys, *local_ignore_keys)
-    patterns = (*global_ignore_patterns, *local_ignore_patterns)
+    patterns = list((*global_ignore_patterns, *local_ignore_patterns))
+    compiled = _compile_patterns(patterns) if patterns else []
 
-    return [
-        e
-        for e in entries
-        if not (keys and _path_has_key(e, keys))
-        and not (patterns and _value_matches(e, patterns))
-    ]
+    kept: list[DiffEntry] = []
+    ignored: list[DiffEntry] = []
+
+    for e in entries:
+        if keys and _path_has_key(e, keys):
+            ignored.append(e)
+        elif compiled and _smart_ignore(compiled, e):
+            ignored.append(e)
+        else:
+            kept.append(e)
+
+    return kept, ignored
 
 
 def apply_query(entries: list[DiffEntry], query: str) -> list[DiffEntry]:
@@ -91,12 +145,3 @@ def _prefix_filter(entries: list[DiffEntry], prefix: str) -> list[DiffEntry]:
 
 def _path_has_key(entry: DiffEntry, ignore_keys: Sequence[str]) -> bool:
     return any(str(seg) in ignore_keys for seg in entry.path)
-
-
-def _value_matches(entry: DiffEntry, patterns: Sequence[str]) -> bool:
-    lower = [p.lower() for p in patterns]
-
-    def hit(v: Any) -> bool:
-        return v is not None and any(p in str(v).lower() for p in lower)
-
-    return hit(entry.old_value) or hit(entry.new_value)

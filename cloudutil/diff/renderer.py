@@ -3,6 +3,7 @@
 import json as _json
 from collections import defaultdict
 from collections.abc import Callable
+from difflib import SequenceMatcher
 from typing import Any, Literal, NamedTuple
 
 from rich import box
@@ -17,6 +18,7 @@ ValueStyle = Literal["default", "hcl"]
 Fmt = Callable[[Any], str]
 
 ADD, DEL, ARROW, NOTE, LABEL = "green", "red", "dim", "dim italic", "bold"
+DIFF_DEL_BG, DIFF_ADD_BG = "red on #3a1414", "green on #143a1c"
 
 
 class _Line(NamedTuple):
@@ -268,6 +270,19 @@ def _is_scalar(v: Any) -> bool:
     return not isinstance(v, (dict, list))
 
 
+def _diff_pair(old_str: str, new_str: str) -> tuple[Text, Text]:
+    """Highlight the exact differing spans between old/new, red/green bg."""
+    old, new = Text(style="red"), Text(style="green")
+    for op, i1, i2, j1, j2 in SequenceMatcher(a=old_str, b=new_str).get_opcodes():
+        if op == "equal":
+            old.append(old_str[i1:i2])
+            new.append(new_str[j1:j2])
+        else:
+            old.append(old_str[i1:i2], style=DIFF_DEL_BG)
+            new.append(new_str[j1:j2], style=DIFF_ADD_BG)
+    return old, new
+
+
 # ── Table ─────────────────────────────────────────────────────────────────────
 
 
@@ -303,8 +318,8 @@ def _render_table(
     )
     t.add_column("", width=3, no_wrap=True, justify="center")
     t.add_column("Path", style="bold", no_wrap=True)
-    t.add_column(col_label("−", file_a, branch_a), style="red")
-    t.add_column(col_label("+", file_b, branch_b), style="green")
+    t.add_column(col_label("−", file_a, branch_a), style="red", overflow="fold")
+    t.add_column(col_label("+", file_b, branch_b), style="green", overflow="fold")
 
     added = removed = changed = 0
     dash = Text("—", style="dim")
@@ -312,16 +327,13 @@ def _render_table(
         sym, style = _KIND[entry.kind]
         if entry.kind == "added":
             added += 1
+            old, new = dash, Text(fmt(entry.new_value), style="green")
         elif entry.kind == "removed":
             removed += 1
+            old, new = Text(fmt(entry.old_value), style="red"), dash
         else:
             changed += 1
-        old = dash if entry.kind == "added" else Text(fmt(entry.old_value), style="red")
-        new = (
-            dash
-            if entry.kind == "removed"
-            else Text(fmt(entry.new_value), style="green")
-        )
+            old, new = _diff_pair(fmt(entry.old_value), fmt(entry.new_value))
         t.add_row(Text(sym, style=f"bold {style}"), entry.path_str, old, new)
 
     _render_ignored_section(ignored or [])

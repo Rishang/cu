@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
 """YAML Diff Checker using JMESPath + Rich."""
 
-import re
-import subprocess
-from difflib import SequenceMatcher
 from itertools import combinations
 from pathlib import Path
 from typing import Any
@@ -17,33 +14,27 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from cloudutil.diff.loader import GitBranchError, require_git_branch
+from cloudutil.diff.patterns import (
+    CompiledPatterns,
+    any_pattern_matches,
+    compile_patterns,
+    values_similar_after_stripping,
+)
 from cloudutil.utils import console
 
 # ── Types ──────────────────────────────────────────────────────────────────────
 
 type FlatDict = dict[str, Any]
-type CompiledPatterns = list[re.Pattern]
-
 # ── Git helpers ────────────────────────────────────────────────────────────────
 
 
 def get_git_branch(file_path: str) -> str:
     """Return the current git branch for the repo containing *file_path*."""
     try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            cwd=Path(file_path).resolve().parent,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        if (branch := result.stdout.strip()) and branch != "HEAD":
-            return branch
-        raise ValueError("detached HEAD — no branch name available")
-    except subprocess.CalledProcessError as e:
-        raise ValueError(
-            f"Could not determine git branch for '{file_path}': {e.stderr.strip()}"
-        ) from e
+        return require_git_branch(file_path)
+    except GitBranchError as exc:
+        raise ValueError(str(exc)) from exc
 
 
 # ── Pydantic models ────────────────────────────────────────────────────────────
@@ -221,23 +212,6 @@ def flatten(obj: Any, prefix: str = "") -> FlatDict:
 # ── Pattern matching ───────────────────────────────────────────────────────────
 
 
-def _compile(patterns: list[str]) -> CompiledPatterns:
-    return [
-        re.compile(r"(?<![A-Za-z0-9])" + re.escape(p) + r"(?![A-Za-z0-9])")
-        for p in patterns
-    ]
-
-
-def _any_match(compiled: CompiledPatterns, *values: Any) -> bool:
-    return any(pat.search(str(v)) for pat in compiled for v in values)
-
-
-def _strip_all(compiled: CompiledPatterns, value: str) -> str:
-    for pat in compiled:
-        value = pat.sub("", value)
-    return value
-
-
 def _ignore_diff(
     compiled: CompiledPatterns,
     key: str,
@@ -249,11 +223,18 @@ def _ignore_diff(
     Ignore a value difference when the key matches a pattern, OR both values
     match a pattern and are highly similar after stripping pattern tokens (ratio ≥ 0.9).
     """
-    if _any_match(compiled, key):
+    if any_pattern_matches(compiled, key, none_matches=True):
         return True
-    if _any_match(compiled, v1) and _any_match(compiled, v2):
-        s1, s2 = _strip_all(compiled, str(v1)), _strip_all(compiled, str(v2))
-        return SequenceMatcher(None, s1, s2).ratio() >= similarity_threshold
+    if any_pattern_matches(compiled, v1, none_matches=True) and any_pattern_matches(
+        compiled, v2, none_matches=True
+    ):
+        return values_similar_after_stripping(
+            compiled,
+            v1,
+            v2,
+            threshold=similarity_threshold,
+            none_as_empty=False,
+        )
     return False
 
 
@@ -286,7 +267,7 @@ def compare_pair(
     )
     all_keys = sorted(flat1.keys() | flat2.keys())
 
-    compiled = _compile(ignore_patterns or [])
+    compiled = compile_patterns(ignore_patterns or [])
     missing_b, missing_a, value_diff, matching, ignored = [], [], [], [], []
 
     for key in all_keys:
@@ -300,11 +281,15 @@ def compare_pair(
                 ignored.append(key)
             case (True, True):
                 value_diff.append((key, flat1[key], flat2[key]))
-            case (True, False) if compiled and _any_match(compiled, key):
+            case (True, False) if compiled and any_pattern_matches(
+                compiled, key, none_matches=True
+            ):
                 ignored.append(key)
             case (True, False):
                 missing_b.append((key, flat1[key]))
-            case (False, True) if compiled and _any_match(compiled, key):
+            case (False, True) if compiled and any_pattern_matches(
+                compiled, key, none_matches=True
+            ):
                 ignored.append(key)
             case _:
                 missing_a.append((key, flat2[key]))

@@ -1,0 +1,6 @@
+test
+examples
+.venv
+.pytest_cache
+__pycache__/
+collections/

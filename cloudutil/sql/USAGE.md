@@ -223,53 +223,56 @@ cu sql execute -c config.yaml
 
 ## Ansible
 
-Install `cloudutil` into the Python environment used by Ansible, then use the `cloudutil_postgres` module (`cloudutil/sql/ansible/cloudutil_postgres.py`).
+Use the native `cloudutil_postgres` role in `ansible/roles/cloudutil_postgres`. It validates and renders this same Pydantic schema, then applies it with `community.postgresql` modules:
 
-The module accepts exactly one of `config`, `config_file`, or `config_string`:
+| Schema resource | Native module |
+|---|---|
+| databases | `community.postgresql.postgresql_db` |
+| extensions | `community.postgresql.postgresql_ext` |
+| users | `community.postgresql.postgresql_user` |
+| privileges | `community.postgresql.postgresql_privs` |
+| custom SQL | `community.postgresql.postgresql_query` |
 
-```yaml
-# From an inline dict
-- name: Provision PostgreSQL
-  cloudutil_postgres:
-    config:
-      provider:
-        name: postgres
-        version: 17
-        host: localhost
-        port: 5432
-        username: postgres
-        password: "{{ vault_postgres_password }}"
-      database:
-        - name: myapp
-          create: true
-      users:
-        - name: app_user
-          password: "{{ vault_app_password }}"
-          privileges:
-            - db: myapp
-              readwrite: true
-              tables: [ALL]
+Install its self-contained controller dependencies and pinned collection with UV:
 
-# From a YAML file on the target host
-- name: Provision PostgreSQL from file
-  cloudutil_postgres:
-    config_file: /etc/myapp/pg_config.yaml
-  environment:
-    POSTGRES_PASSWORD: "{{ vault_postgres_password }}"
-
-# From a YAML string (e.g. looked up from a file on the controller)
-- name: Provision PostgreSQL from string
-  cloudutil_postgres:
-    config_string: "{{ lookup('file', 'pg_config.yaml') }}"
+```bash
+cd ansible
+uv sync --locked
+uv run ansible-galaxy collection install -r requirements.yml -p collections --force
+export ANSIBLE_ROLES_PATH="$PWD/roles${ANSIBLE_ROLES_PATH:+:$ANSIBLE_ROLES_PATH}"
+export ANSIBLE_COLLECTIONS_PATH="$PWD/collections${ANSIBLE_COLLECTIONS_PATH:+:$ANSIBLE_COLLECTIONS_PATH}"
 ```
 
-**Return values:**
+Pass the YAML path to the role rather than loading it with `vars_files`; this ensures `custom_sql.query` keeps its Pydantic/Jinja rendering semantics:
 
-| Key | Type | Description |
-|-----|------|-------------|
-| `changed` | bool | `true` if any resource was created, updated, or executed |
-| `changes` | list | Full list of `ChangeReport` dicts |
-| `summary` | dict | `{total, create, update, skip, execute}` counts |
+```yaml
+- name: Provision PostgreSQL
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  roles:
+    - role: cloudutil_postgres
+      vars:
+        cloudutil_postgres_config_file: "{{ playbook_dir }}/postgres.yaml"
+        cloudutil_postgres_environment:
+          POSTGRES_PASSWORD: "{{ vault_postgres_password }}"
+          APP_SERVICE_PASSWORD: "{{ vault_app_password }}"
+```
+
+`${VAR}` substitutions and `{{ env.VAR }}` in `custom_sql` read the inherited process environment plus `cloudutil_postgres_environment`. The latter is the recommended way to pass Ansible Vault values. The managed host needs `psycopg2` or `psycopg`, as required by the `community.postgresql` modules.
+
+For inline input, set `cloudutil_postgres_config` instead. Mark SQL Jinja as `!unsafe` so Ansible does not render it before `SQLConfig`:
+
+```yaml
+cloudutil_postgres_config:
+  custom_sql:
+    - database: myapp
+      query: !unsafe "CREATE INDEX idx_{{ table }} ON public.{{ table }} (id)"
+      template_context:
+        table: users
+```
+
+See [`ansible/roles/cloudutil_postgres/README.md`](../../ansible/roles/cloudutil_postgres/README.md) for complete role instructions.
 
 ---
 
@@ -369,4 +372,4 @@ spec:
 - `example.yaml` — comprehensive configuration with all features
 - `modules/base.py` — Pydantic schema definitions (`ProviderConfig`, `DatabaseConfig`, `UserConfig`, `PrivilegeConfig`, `CustomSQLQuery`, `SQLConfig`)
 - `modules/postgres.py` — PostgreSQL provider and builder
-- `ansible/cloudutil_postgres.py` — Ansible module wrapper
+- `../../ansible/roles/cloudutil_postgres/` — native Ansible role implementation

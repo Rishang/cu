@@ -1,0 +1,21 @@
+version: "3"
+
+tasks:
+  build:
+    desc: Build the ansible-sql-worker container image
+    dir: .
+    cmds:
+      - docker build -f Dockerfile -t ansible-sql-worker .
+
+  test:
+    desc: Run end-user Ansible playbook test cases against a mock PostgreSQL server
+    dir: test
+    cmds:
+      - bash run.sh
+
+  lint:
+    dir: .
+    cmds:
+      - ruff format .
+      - ruff check --fix --unsafe-fixes .
+      - ty check --extra-search-path roles/cloudutil_postgres/schemas .

@@ -1,0 +1,20 @@
+[project]
+name = "cloudutil-postgres-ansible"
+version = "0.1.0"
+description = "Self-contained Ansible controller for the CloudUtil PostgreSQL role"
+requires-python = ">=3.13,<3.15"
+dependencies = [
+    "ansible-core==2.20.7rc1",
+    "Jinja2==3.1.6",
+    "pydantic==2.12.5",
+    "PyYAML==6.0.3",
+    "psycopg2-binary==2.9.11",
+]
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+
+[tool.ty.environment]
+# Mirrors the role filter plugin's runtime import path for static analysis.
+extra-paths = ["roles/cloudutil_postgres/schemas"]

@@ -13,8 +13,12 @@ SUPPORTED_EXTENSIONS = {".json", ".yaml", ".yml", ".toml", ".tf", ".hcl", ".tfva
 HCL_EXTENSIONS = {".tf", ".hcl", ".tfvars"}
 
 
-def get_git_branch(path: str | Path) -> str | None:
-    """Return the current git branch for the repo containing *path*, or None."""
+class GitBranchError(ValueError):
+    """Raised when a path is not on a named Git branch."""
+
+
+def require_git_branch(path: str | Path) -> str:
+    """Return the branch for *path* or raise ``GitBranchError`` with context."""
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
@@ -23,9 +27,25 @@ def get_git_branch(path: str | Path) -> str | None:
             text=True,
             check=True,
         )
-        branch = result.stdout.strip()
-        return branch if branch and branch != "HEAD" else None
-    except (subprocess.CalledProcessError, FileNotFoundError):
+    except subprocess.CalledProcessError as exc:
+        raise GitBranchError(
+            f"Could not determine git branch for '{path}': {exc.stderr.strip()}"
+        ) from exc
+    except FileNotFoundError as exc:
+        raise GitBranchError(
+            f"Could not determine git branch for '{path}': git executable not found"
+        ) from exc
+
+    if (branch := result.stdout.strip()) and branch != "HEAD":
+        return branch
+    raise GitBranchError("detached HEAD — no branch name available")
+
+
+def get_git_branch(path: str | Path) -> str | None:
+    """Return the current git branch for the repo containing *path*, or None."""
+    try:
+        return require_git_branch(path)
+    except GitBranchError:
         return None
 
 

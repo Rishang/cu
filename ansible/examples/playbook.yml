@@ -1,0 +1,18 @@
+---
+- name: Provision PostgreSQL from the CloudUtil schema
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    ansible_python_interpreter: "{{ ansible_playbook_python }}"
+  roles:
+    - role: cloudutil_postgres
+      vars:
+        cloudutil_postgres_config_file: "{{ playbook_dir }}/postgres.yaml"
+        cloudutil_postgres_environment:
+          POSTGRES_HOST: "{{ lookup('env', 'POSTGRES_HOST') }}"
+          POSTGRES_USER: "{{ lookup('env', 'POSTGRES_USER') }}"
+          POSTGRES_PASSWORD: "{{ lookup('env', 'POSTGRES_PASSWORD') }}"
+          EXAMPLE_READER_PASSWORD: "{{ lookup('env', 'EXAMPLE_READER_PASSWORD') }}"
+          EXAMPLE_WRITER_PASSWORD: "{{ lookup('env', 'EXAMPLE_WRITER_PASSWORD') }}"
+          EXAMPLE_AUTOMATION_PASSWORD: "{{ lookup('env', 'EXAMPLE_AUTOMATION_PASSWORD') }}"

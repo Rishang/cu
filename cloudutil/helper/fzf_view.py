@@ -14,43 +14,35 @@ from rich.console import Console
 T = TypeVar("T")
 
 
-def _run_fzf(items: List[str], multi_select: bool = True) -> List[str]:
-    """
-    Pipe *items* into fzf and return the user's selection(s).
+def _run_fzf(items: List[str], multi_select: bool = True) -> tuple[int, List[str], str]:
+    """Run fzf and return ``(returncode, selected_lines, stderr)``.
 
-    Returns an empty list when the user cancels or fzf is not installed.
+    Callers own presentation so the legacy selector and ``FzfView`` can retain
+    their distinct messages while sharing the process invocation.
     """
     if not items:
-        return []
+        return 0, [], ""
 
-    fzf_cmd = ["fzf", "-e"]
+    command = ["fzf", "-e"]
     if multi_select:
-        fzf_cmd.append("-m")
+        command.append("-m")
 
     try:
         result = subprocess.run(
-            fzf_cmd,
+            command,
             input="\n".join(items),
             capture_output=True,
             text=True,
             check=False,
         )
     except FileNotFoundError:
-        console.print(
-            "[bold red][!] ERROR: fzf not found. Please install fzf.[/bold red]"
-        )
-        return []
+        return 127, [], "Command not found: fzf"
 
-    if result.returncode not in (0, 1):
-        # returncode 1 means no match / cancelled — that is fine; anything else is an error.
-        console.print(
-            f"[bold red][!] ERROR: fzf exited with code {result.returncode}: "
-            f"{result.stderr.strip()}[/bold red]"
-        )
-        return []
-
-    selected = result.stdout.strip().splitlines()
-    return [line for line in selected if line]
+    return (
+        result.returncode,
+        [line for line in result.stdout.strip().splitlines() if line],
+        result.stderr.strip(),
+    )
 
 
 class FzfView(ABC, Generic[T]):
@@ -148,8 +140,20 @@ class FzfView(ABC, Generic[T]):
         self.before_fzf(items)
 
         labels = [self.item_label(item) for item in items]
-        selected_labels = _run_fzf(labels, multi_select=self.multi_select)
-
+        returncode, selected_labels, stderr = _run_fzf(
+            labels, multi_select=self.multi_select
+        )
+        if returncode == 127:
+            console.print(
+                "[bold red][!] ERROR: fzf not found. Please install fzf.[/bold red]"
+            )
+            return
+        if returncode not in (0, 1):
+            console.print(
+                f"[bold red][!] ERROR: fzf exited with code {returncode}: "
+                f"{stderr}[/bold red]"
+            )
+            return
         if not selected_labels:
             console.print("[yellow][!] No selection made.[/yellow]")
             return

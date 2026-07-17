@@ -139,6 +139,7 @@ celerybeat.pid
 .env
 .envrc
 .venv
+ansible/collections/
 env/
 venv/
 ENV/
@@ -209,3 +210,4 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+.pi-subagents/

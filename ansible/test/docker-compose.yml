@@ -1,0 +1,24 @@
+services:
+  postgres:
+    build:
+      context: ./images/rds-mock
+      dockerfile: Dockerfile
+    image: cloudutil-rds-mock:test
+    environment:
+      POSTGRES_USER: aws_internal_superuser
+      POSTGRES_PASSWORD: hidden_root_password
+      POSTGRES_DB: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aws_internal_superuser -d postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  ansible:
+    build:
+      context: ../..
+      dockerfile: ansible/Dockerfile
+    image: ansible-sql-worker
+    depends_on:
+      postgres:
+        condition: service_healthy

@@ -40,7 +40,7 @@ class ProviderConfig(BaseModel):
         description=f"SSL connection mode. One of: {', '.join(sorted(SSL_MODES))}.",
     )
 
-    @field_validator("username", "password", mode="before")
+    @field_validator("host", "username", "password", mode="before")
     @classmethod
     def resolve_env_vars(cls, v: str, info) -> str:
         return resolve_env_variable(v, f"provider.{info.field_name}")

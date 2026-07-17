@@ -1,0 +1,42 @@
+provider:
+  name: postgres
+  version: 18
+  host: ${CASE_S2_HOST}
+  port: 5432
+  username: ${CASE_S2_USER}
+  password: ${CASE_S2_PASSWORD}
+
+database:
+  - name: cloudutil_case_s2
+    extensions:
+      - name: pgcrypto
+
+users:
+  - name: cloudutil_s2_writer
+    password: ${CASE_S2_WRITER_PASSWORD}
+    privileges:
+      - db: cloudutil_case_s2
+        readwrite: true
+        tables: [ALL]
+  - name: cloudutil_s2_reader
+    password: ${CASE_S2_READER_PASSWORD}
+    privileges:
+      - db: cloudutil_case_s2
+        readonly: true
+        tables: [ALL]
+
+# These tables are created after the ALL grants, verifying default privileges.
+custom_sql:
+  - name: create_tables
+    database: cloudutil_case_s2
+    query: |
+      CREATE TABLE public.{{ current_table }} (id integer PRIMARY KEY, value text NOT NULL);
+      CREATE TABLE public.{{ future_table }} (id integer PRIMARY KEY);
+    template_context:
+      current_table: s2_role_smoke
+      future_table: s2_default_privileges_smoke
+  - name: seed_table
+    database: cloudutil_case_s2
+    query: |
+      INSERT INTO public.s2_role_smoke (id, value) VALUES (%s, %s);
+    params: [1, created-by-rds-master]

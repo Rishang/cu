@@ -1,0 +1,13 @@
+.git
+.pi-subagents
+.venv
+__pycache__
+*.py[cod]
+.pytest_cache
+coverage.xml
+htmlcov
+.env
+.envrc
+build
+dist
+*.egg-info

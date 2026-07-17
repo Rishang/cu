@@ -1,12 +1,11 @@
 """cloudutil.helper — shared utilities re-exported for convenience."""
 
-from cloudutil.helper.fzf_view import FzfView
+from cloudutil.helper.fzf_view import FzfView, _run_fzf
 
 # Re-export the legacy helpers that existing modules import from cloudutil.helper
 # so nothing breaks while callers are migrated to the new package layout.
 from cloudutil.utils import ShellRunner, shell, resolve_env_variable
 
-from cloudutil.utils import shell as _shell
 from cloudutil.utils import console as _console
 from typing import List as _List
 
@@ -32,14 +31,9 @@ def fzf_select(
             f"[*] Found {len(items)} {service_name}s. Opening fzf for selection..."
         )
 
-    fzf_cmd = ["fzf", "-e"]
-    if multi_select:
-        fzf_cmd.append("-m")
-
-    success, stdout, stderr = _shell.run_command(fzf_cmd, input_text="\n".join(items))
-
-    if not success:
-        if "Command not found" in stderr and "fzf" in stderr:
+    returncode, selected, stderr = _run_fzf(items, multi_select=multi_select)
+    if returncode != 0:
+        if returncode == 127:
             _console.print(
                 f"[bold red][!] ERROR: fzf not found. Please install fzf for "
                 f"interactive {service_name} selection.[/bold red]"
@@ -49,8 +43,6 @@ def fzf_select(
                 f"[bold red][!] ERROR: fzf selection failed: {stderr}[/bold red]"
             )
         return []
-
-    selected = stdout.strip().splitlines()
 
     if not selected:
         if not quiet:

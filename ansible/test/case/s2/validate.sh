@@ -22,15 +22,24 @@ psql_root() {
     psql -U rds_master_user -d "$1" -Atqc "$2"
 }
 
+# Verify rds_master_user is not superuser, but has CREATEDB and CREATEROLE
 [ "$(psql_root postgres "SELECT rolsuper || ',' || rolcreatedb || ',' || rolcreaterole FROM pg_roles WHERE rolname = 'rds_master_user'")" = "false,true,true" ]
+
+# Verify the database is owned by rds_master_user
 [ "$(psql_root postgres "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = 'cloudutil_case_s2'")" = "rds_master_user" ]
+
+# Verify the pgcrypto extension was installed in the database
 [ "$(psql_root cloudutil_case_s2 "SELECT extname FROM pg_extension WHERE extname = 'pgcrypto'")" = "pgcrypto" ]
+
+# Verify table privileges: reader has SELECT only, writer has full CRUD, reader has SELECT on default-privileges table
 [ "$(psql_root cloudutil_case_s2 "SELECT has_table_privilege('cloudutil_s2_reader', 'public.s2_role_smoke', 'SELECT'), has_table_privilege('cloudutil_s2_reader', 'public.s2_role_smoke', 'INSERT'), has_table_privilege('cloudutil_s2_writer', 'public.s2_role_smoke', 'SELECT,INSERT,UPDATE,DELETE'), has_table_privilege('cloudutil_s2_reader', 'public.s2_default_privileges_smoke', 'SELECT')")" = "t|f|t|t" ]
 
+# Verify the reader can read seeded data
 [ "$(docker compose exec -T -e PGPASSWORD=reader-password postgres \
   psql -h 127.0.0.1 -U cloudutil_s2_reader -d cloudutil_case_s2 -Atqc \
   "SELECT value FROM public.s2_role_smoke WHERE id = 1")" = "created-by-rds-master" ]
 
+# Verify the reader is denied INSERT (read-only enforcement)
 if docker compose exec -T -e PGPASSWORD=reader-password postgres \
   psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U cloudutil_s2_reader -d cloudutil_case_s2 \
   -c "INSERT INTO public.s2_role_smoke VALUES (2, 'forbidden')" >/dev/null 2>&1; then
@@ -38,6 +47,7 @@ if docker compose exec -T -e PGPASSWORD=reader-password postgres \
   exit 1
 fi
 
+# Verify the writer can INSERT and the change is visible to the master user
 docker compose exec -T -e PGPASSWORD=writer-password postgres \
   psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U cloudutil_s2_writer -d cloudutil_case_s2 \
   -c "INSERT INTO public.s2_role_smoke VALUES (2, 'writer-ok')" >/dev/null

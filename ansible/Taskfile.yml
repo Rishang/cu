@@ -13,6 +13,12 @@ tasks:
     cmds:
       - bash run.sh
 
+  test:plan:
+    desc: Dry-run the Ansible test cases (--check --diff) to preview changes, like terraform plan
+    dir: test
+    cmds:
+      - bash run.sh --check
+
   lint:
     dir: .
     cmds:

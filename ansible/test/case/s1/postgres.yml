@@ -18,6 +18,12 @@ users:
       - db: cloudutil_case_s1
         readwrite: true
         tables: [ALL]
+  - name: cloudutil_s1_reader
+    password: reader-password
+    privileges:
+      - db: cloudutil_case_s1
+        readonly: true
+        tables: [ALL]
 
 custom_sql:
   - name: create_table

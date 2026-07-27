@@ -138,7 +138,12 @@ def ssm_instance(
 
 def list_ssm_instances() -> List[dict[str, str]]:
     ec2 = get_aws_client("ec2")
-    response = ec2.describe_instances(Filters=[{"Name": "tag:Name", "Values": ["*"]}])
+    response = ec2.describe_instances(
+        Filters=[
+            {"Name": "tag:Name", "Values": ["*"]},
+            {"Name": "instance-state-name", "Values": ["running"]},
+        ]
+    )
     instances = []
     for reservation in response["Reservations"]:
         for instance in reservation["Instances"]:

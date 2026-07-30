@@ -5,7 +5,9 @@ from pathlib import Path
 from cloudutil.diff.engine import compute_diff
 from cloudutil.diff.filters import apply_filters
 
-ASSETS = Path(__file__).parent / "assets"
+# Fixtures stay at the repo's tests/assets, shared with the Go suite.
+ASSETS_DIR = Path(__file__).resolve().parents[2] / "tests" / "assets"
+ASSETS = ASSETS_DIR
 
 
 def _load_yaml(name: str) -> dict:

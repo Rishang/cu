@@ -13,10 +13,12 @@ from cloudutil.diff.renderer import _fmt_hcl
 
 # ── fixtures ──────────────────────────────────────────────────────────────────
 
-PROD_TFVARS = Path(__file__).parent / "assets" / "prod.tfvars"
-STAGE_TFVARS = Path(__file__).parent / "assets" / "stage.tfvars"
-INFRA_A = Path(__file__).parent / "assets" / "infra-a.tf"
-INFRA_B = Path(__file__).parent / "assets" / "infra-b.tf"
+# Fixtures stay at the repo's tests/assets, shared with the Go suite.
+ASSETS_DIR = Path(__file__).resolve().parents[2] / "tests" / "assets"
+PROD_TFVARS = ASSETS_DIR / "prod.tfvars"
+STAGE_TFVARS = ASSETS_DIR / "stage.tfvars"
+INFRA_A = ASSETS_DIR / "infra-a.tf"
+INFRA_B = ASSETS_DIR / "infra-b.tf"
 
 
 @pytest.fixture()

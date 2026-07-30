@@ -1,0 +1,71 @@
+name: Go
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "ansible/**"
+      - "**/*.md"
+  pull_request:
+    paths-ignore:
+      - "ansible/**"
+      - "**/*.md"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+
+      - name: Verify formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files need gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build
+        run: go build ./...
+
+      # fzf is embedded, so its integration is covered here rather than
+      # depending on a binary being installed on the runner.
+      - name: Test
+        run: go test -race ./...
+
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+
+      - name: Build the CLI
+        run: go build -o cu .
+
+      - name: Exercise the command surface
+        run: |
+          ./cu --help
+          ./cu --version
+          for group in aws az os k pwpush diff task; do
+            ./cu "$group" --help > /dev/null
+          done
+          ./cu completion bash > /dev/null
+          ./cu diff --print-schema > /dev/null
+
+      - name: Diff exits 1 when files differ
+        run: |
+          ./cu diff -f tests/assets/config-a.json -f tests/assets/config-b.yaml && exit 1
+          ./cu diff -f tests/assets/app-dev.yaml -f tests/assets/app-dev.yaml

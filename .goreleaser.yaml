@@ -1,0 +1,76 @@
+version: 2
+
+project_name: cloudutil
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: cu
+    binary: cu
+    main: .
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .Commit }}
+      - -X main.date={{ .Date }}
+
+archives:
+  - id: cu
+    ids:
+      - cu
+    name_template: >-
+      cu_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - README.md
+      - LICENSE*
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+
+homebrew_casks:
+  - name: cu
+    ids:
+      - cu
+    repository:
+      owner: Rishang
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    homepage: https://github.com/Rishang/cloudutil
+    description: Cloud and Kubernetes utilities with fuzzy selection and semantic config diffing
+    # fzf is compiled in, so nothing is needed for interactive selection. The AWS
+    # CLI, kubectl and task are only used by the commands that shell out to them.
+    hooks:
+      post:
+        install: |
+          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/cu"]
+          end

@@ -2,21 +2,17 @@
 
 CLI `cu` is a wrapper for most common AWS and Azure cloud operations with interactive selection and beautiful output.
 
-[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
+[![Go 1.26+](https://img.shields.io/badge/go-1.26+-00ADD8.svg)](https://go.dev/dl/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![AWS](https://img.shields.io/badge/AWS-Cloud-orange.svg)](https://aws.amazon.com/)
 [![Azure](https://img.shields.io/badge/Azure-Cloud-blue.svg)](https://azure.microsoft.com/)
 [![Kubernetes](https://img.shields.io/badge/Kubernetes-Cloud-blue.svg)](https://kubernetes.io/)
 
 ```bash
-pip install -U git+https://github.com/Rishang/cloudutil.git
+go install github.com/Rishang/cloudutil@latest
 ```
 
-OR Build from source:
-
-```bash
-cd /tmp && git clone https://github.com/Rishang/cloudutil.git && cd cloudutil && uv build && pip install ./dist/cloudutil-*.tar.gz
-```
+A single static binary — `fzf` is compiled in, so there is nothing else to install for interactive selection.
 
 ## 📚 Table of Contents
 
@@ -25,6 +21,7 @@ cd /tmp && git clone https://github.com/Rishang/cloudutil.git && cd cloudutil &&
   - [✨ Features](#-features)
   - [📦 Installation](#-installation)
     - [Requirements](#requirements)
+    - [Shell Completion](#shell-completion)
   - [🚀 Usage](#-usage)
     - [Top-level commands](#top-level-commands)
     - [AWS Operations](#aws-operations)
@@ -38,7 +35,6 @@ cd /tmp && git clone https://github.com/Rishang/cloudutil.git && cd cloudutil &&
         - [Environment Variables](#environment-variables)
     - [Azure Operations (`az`)](#azure-operations-az)
       - [Key Vault Secrets](#key-vault-secrets)
-    - [SQL Operations](#sql-operations)
     - [Kubernetes Operations](#kubernetes-operations)
       - [Kubernetes Secrets](#kubernetes-secrets)
       - [Kubernetes ConfigMaps](#kubernetes-configmaps)
@@ -52,6 +48,7 @@ cd /tmp && git clone https://github.com/Rishang/cloudutil.git && cd cloudutil &&
   - [📋 Command Reference](#-command-reference)
   - [🔧 Development](#-development)
     - [Local Development](#local-development)
+    - [Layout](#layout)
 
 ## ✨ Features
 
@@ -59,10 +56,9 @@ cd /tmp && git clone https://github.com/Rishang/cloudutil.git && cd cloudutil &&
 - 🔐 **SSM Parameter Management** - Search and retrieve parameters with fuzzy finding
 - 📡 **SSM Instance Connections** - Direct SSH and port forwarding through Systems Manager
 - 🔑 **Secrets Manager Integration** - Interactive secret browsing with JSON formatting
-- 🎯 **Fuzzy Selection** - Powered by `fzf` for lightning-fast interactive selection
-- 🎨 **Beautiful Output** - Rich terminal interface with colors and formatting
+- 🎯 **Fuzzy Selection** - Real `fzf`, compiled into the binary — no separate install, and your `$FZF_DEFAULT_OPTS` still apply
+- 🎨 **Beautiful Output** - Colored tables and diffs, with status on stderr so stdout stays pipeable
 - ⚡ **Profile & Region Support** - Seamless switching between AWS profiles and regions (where supported per command)
-- 🐍 **SQL Database Management** - Declarative PostgreSQL configuration via YAML (`validate`, `execute`, `init`)
 - 🎛️ **Kubernetes Operations** - Interactive Kubernetes secrets and ConfigMaps browsing via `kubectl`
 - 🧰 **OS Utils** - Shell history search
 - 🔍 **Semantic Diff** - Structural diff of JSON, YAML, TOML, and HCL/Terraform config files. Table or unified output, N-way comparison, smart env-pattern ignore, JMESPath filtering, and auto-detection of `cu_diff.yml`
@@ -72,53 +68,65 @@ cd /tmp && git clone https://github.com/Rishang/cloudutil.git && cd cloudutil &&
 ## 📦 Installation
 
 ```bash
-pip install -U git+https://github.com/Rishang/cloudutil.git
+# With Go
+go install github.com/Rishang/cloudutil@latest
+
+# With Homebrew
+brew install Rishang/tap/cu
 ```
 
-OR
+Or grab a prebuilt binary for your platform from the
+[releases page](https://github.com/Rishang/cloudutil/releases) — Linux, macOS and
+Windows, amd64 and arm64.
+
+Build from source:
 
 ```bash
-git clone https://github.com/Rishang/cloudutil.git && cd cloudutil && uv build && pip install ./dist/cloudutil-*.tar.gz
+git clone https://github.com/Rishang/cloudutil.git && cd cloudutil && go build -o cu .
 ```
 
 ### Requirements
 
-- Python 3.12+
-- `fzf` for interactive selection
-- [Only for AWS operations] AWS CLI configured with credentials
+Nothing at all for `cu diff`, `cu os history` and `cu pwpush` — the binary is
+static and `fzf` is compiled in. The remaining commands drive tools you almost
+certainly already have:
+
+- [Only for AWS operations] AWS CLI configured with credentials (`cu aws ec2-ssm` also needs the [Session Manager plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html))
 - [Only for Azure operations] Azure CLI (`az login` must be run primarily)
 - [Only for Kubernetes operations] `kubectl` configured with access to your target cluster
 - [Only for Taskfile operations] [Taskfile](https://taskfile.dev/) installed and configured
 - [Only for Password Pusher operations] [Password Pusher](https://pwpush.com/) configured
 
+### Shell Completion
 
 ```bash
-# Install fzf (if not already installed)
-# macOS
-brew install fzf
+# zsh — add to ~/.zshrc, or write to a directory on $fpath
+source <(cu completion zsh)
 
-# Ubuntu/Debian
-sudo apt install fzf
+# bash
+source <(cu completion bash)
 
-# Or follow: https://github.com/junegunn/fzf#installation
+# fish
+cu completion fish | source
 ```
+
+`cu completion --help` covers permanent installation for each shell.
 
 ## 🚀 Usage
 
 ### Top-level commands
 
-The main entrypoint is `cu` (see `[project.scripts]` in `pyproject.toml`). Subcommands are wired in `cloudutil/cli.py`:
+The main entrypoint is `cu`. Subcommands are wired in `internal/cli/root.go`:
 
-| Command | Module | Purpose |
+| Command | Source | Purpose |
 |--------|--------|---------|
-| `cu aws` | `cloudutil.aws.cli` | AWS (login, SSM, Secrets Manager, decode message) |
-| `cu az` | `cloudutil.azure.cli` | Azure Key Vault secrets |
-| `cu sql` | `cloudutil.sql.cli` | PostgreSQL config validate / execute / init |
-| `cu os` | `cloudutil.os_utils.cli` | YAML diff, shell history |
-| `cu k` | `cloudutil.k8s.cli` | Kubernetes secrets, ConfigMaps, context switch |
-| `cu diff` | `cloudutil.diff.cli` | Semantic diff of JSON, YAML, and TOML config files |
-| `cu pwpush` | `cloudutil.pwpush.cli` | Password Pusher |
-| `cu task` | `cloudutil.task.cli` | Passthrough to the `task` binary |
+| `cu aws` | `internal/cli/aws.go` | AWS (login, SSM, Secrets Manager, decode message) |
+| `cu az` | `internal/cli/azure.go` | Azure Key Vault secrets |
+| `cu os` | `internal/cli/os.go` | Shell history search |
+| `cu k` | `internal/cli/k8s.go` | Kubernetes secrets, ConfigMaps, context switch |
+| `cu diff` | `internal/cli/diff.go` | Semantic diff of JSON, YAML, TOML, and HCL config files |
+| `cu pwpush` | `internal/cli/pwpush.go` | Password Pusher |
+| `cu task` | `internal/cli/task.go` | Passthrough to the `task` binary |
 
 ### AWS Operations
 
@@ -331,24 +339,6 @@ Content Type: 'password'
 ID: 'https://my-key-vault.vault.azure.net/secrets/prod-db-password/...'
 Value:
 super-secret-value
-```
-
-### SQL Operations
-
-PostgreSQL-oriented workflows (see `cloudutil/sql/cli.py`):
-
-```bash
-# Generate a sample YAML template (default: config.yaml)
-cu sql init
-cu sql init -o my-config.yaml
-
-# Validate configuration without connecting
-cu sql validate my-config.yaml
-
-# Apply configuration
-cu sql execute --config-file my-config.yaml
-# short form:
-cu sql execute -c my-config.yaml
 ```
 
 ### Kubernetes Operations
@@ -577,26 +567,17 @@ diffs:
 
 Config file paths are resolved relative to the config file's location, so you can run `cu diff` from any directory.
 
-#### JMESPath YAML diff (`--ydiff`)
-
-Legacy mode — compare YAML nodes at a specific JMESPath path across multiple files:
-
-```bash
-cu diff --ydiff ydiff_config.yaml
-```
-
 #### Print config schema
 
 ```bash
-cu diff --print-schema diff    # schema for cu_diff.yml
-cu diff --print-schema ydiff   # schema for --ydiff config
+cu diff --print-schema    # schema for cu_diff.yml
 ```
 
 The schema output is designed to be fed to an AI/CLI agent. Pipe it along with your file list to auto-generate a valid `cu_diff.yml`:
 
 ```bash
 # Let an LLM generate cu_diff.yml for your files
-cu diff --print-schema diff | llm "Generate a cu_diff.yml for these helm values files: \
+cu diff --print-schema | llm "Generate a cu_diff.yml for these helm values files: \
   k8s/helm/*/values-qa.yaml vs k8s/helm/*/values-prod.yaml \
   with ignore_patterns: qa,prod"
 ```
@@ -624,7 +605,7 @@ cu task --help
 
 ### Password Pusher Operations
 
-Manage temporary secret sharing with [Password Pusher](https://pwpush.com/) (`cloudutil/pwpush/cli.py`).
+Manage temporary secret sharing with [Password Pusher](https://pwpush.com/).
 
 ```bash
 # Save Password Pusher config (requires --token, --source, and --email)
@@ -656,16 +637,19 @@ All commands use `fzf` for interactive selection, providing:
 - **Real-time filtering** - Instant results as you type
 - **Keyboard shortcuts** - Standard fzf navigation
 
+`fzf` is the real thing, linked into `cu` rather than shelled out to, so there is
+no separate install and no `fzf: command not found`. Your `$FZF_DEFAULT_OPTS`
+and `$FZF_DEFAULT_OPTS_FILE` are honored exactly as usual.
+
 ## 📋 Command Reference
 
 | Group | Commands |
 |-------|----------|
 | `cu aws` | `login`, `ssm-parameters`, `ec2-ssm`, `secrets`, `decode-message` |
 | `cu az` | `secrets` |
-| `cu sql` | `execute`, `validate`, `init` |
 | `cu os` | `history` |
 | `cu k` | `secrets`, `configmaps`, `ctx` |
-| `cu diff` | `-f <a> -f <b>`, `--config <config.yaml>`, `--ydiff <config.yaml>` |
+| `cu diff` | `-f <a> -f <b>`, `--config <config.yaml>` |
 | `cu pwpush` | `config`, `send`, `list-active`, `pwgen` |
 | `cu task` | forwards to `task -t <taskfile> -d <dir> ...` |
 
@@ -679,15 +663,30 @@ Run `cu --help` and `cu <group> --help` for live usage.
 git clone https://github.com/Rishang/cloudutil.git
 cd cloudutil
 
-# Install dependencies (creates .venv when using uv)
-uv sync
+# Build and run
+go build -o cu .
+./cu --help
 
-# Run the CLI (console script from pyproject)
-uv run cu --help
+# Or run without building
+go run . --help
 
-# Or activate the venv and run cu directly
-source .venv/bin/activate
-cu --help
+# Tests, vet and formatting
+go test ./...
+go vet ./...
+gofmt -l .
+```
+
+### Layout
+
+```
+main.go              entrypoint and version stamping
+internal/cli/        one file per command group, cobra wiring
+internal/diff/       loaders, diff engine, filters, renderer, cu_diff.yml schema
+internal/awsx/       AWS SDK calls
+internal/kube/       kubectl invocations
+internal/pick/       fzf, embedded via its Input/Output channels
+internal/ui/         styles, tables, rules; stderr for status, stdout for data
+tests/assets/        fixtures shared by the Go tests
 ```
 
 ---

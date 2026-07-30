@@ -45,11 +45,7 @@ def apply_filters(
     """
     keys = (*global_ignore_keys, *local_ignore_keys)
     patterns = list((*global_ignore_patterns, *local_ignore_patterns))
-    compiled = (
-        compile_patterns(patterns, split_commas=True, ignore_case=True)
-        if patterns
-        else []
-    )
+    compiled = compile_patterns(patterns) if patterns else []
 
     kept: list[DiffEntry] = []
     ignored: list[DiffEntry] = []

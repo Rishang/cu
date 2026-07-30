@@ -1,33 +1,29 @@
-"""Regression tests for helpers shared by modern diff and legacy ydiff."""
+"""Regression tests for the diff command's ignore-pattern helpers."""
 
-from cloudutil.diff.patterns import (
-    any_pattern_matches,
-    compile_patterns,
-    values_similar_after_stripping,
-)
+from cloudutil.diff.patterns import compile_patterns, values_similar_after_stripping
 
 
-def test_modern_diff_pattern_semantics_are_case_insensitive_and_split_commas():
-    compiled = compile_patterns([" dev, PROD "], split_commas=True, ignore_case=True)
-
-    assert any_pattern_matches(compiled, "DEV-api")
-    assert any_pattern_matches(compiled, "prod-api")
-    assert not any_pattern_matches(compiled, "mydevapi")
-
-
-def test_legacy_ydiff_pattern_semantics_remain_case_sensitive():
-    compiled = compile_patterns(["dev"])
-
-    assert any_pattern_matches(compiled, "dev-api")
-    assert not any_pattern_matches(compiled, "DEV-api")
-
-
-def test_none_stringification_can_preserve_legacy_ydiff_behavior():
-    compiled = compile_patterns(["None"])
+def test_patterns_split_commas_and_ignore_case():
+    compiled = compile_patterns([" dev, PROD "])
 
     assert values_similar_after_stripping(
-        compiled, None, None, threshold=1.0, none_as_empty=False
+        compiled,
+        "DEV-api",
+        "prod-api",
+        threshold=1.0,  # gitleaks:allow - hostnames
     )
     assert not values_similar_after_stripping(
-        compiled, None, "different", threshold=1.0, none_as_empty=False
+        compiled,
+        "mydevapi",
+        "myprodapi",
+        threshold=1.0,  # gitleaks:allow - hostnames
+    )
+
+
+def test_absent_values_compare_as_empty():
+    compiled = compile_patterns(["dev"])
+
+    assert values_similar_after_stripping(compiled, None, "", threshold=1.0)
+    assert not values_similar_after_stripping(
+        compiled, None, "different", threshold=1.0
     )

@@ -2,10 +2,6 @@
 
 from cloudutil.helper.fzf_view import FzfView, _run_fzf
 
-# Re-export the legacy helpers that existing modules import from cloudutil.helper
-# so nothing breaks while callers are migrated to the new package layout.
-from cloudutil.utils import ShellRunner, shell, resolve_env_variable
-
 from cloudutil.utils import console as _console
 from typing import List as _List
 
@@ -54,8 +50,5 @@ def fzf_select(
 
 __all__ = [
     "FzfView",
-    "ShellRunner",
-    "shell",
     "fzf_select",
-    "resolve_env_variable",
 ]

@@ -15,7 +15,6 @@ from .filters import apply_filters, apply_query
 from .loader import HCL_EXTENSIONS, get_git_branch, load_file
 from .schemas import Diff, DiffConfig
 from .renderer import render
-from . import ydiff as _ydiff
 
 
 class Format(str, Enum):
@@ -25,11 +24,6 @@ class Format(str, Enum):
 
 
 _FORMAT_DEFAULT = Format.table  # fallback when neither CLI nor config specifies format
-
-
-class SchemaTarget(str, Enum):
-    diff = "diff"
-    ydiff = "ydiff"
 
 
 def _err(msg: str) -> None:
@@ -85,14 +79,6 @@ def diff_cmd(
         bool,
         typer.Option("--color/--no-color", help="Enable/disable colored output."),
     ] = True,
-    ydiff: Annotated[
-        Path | None,
-        typer.Option(
-            "--ydiff",
-            help="JMESPath-based YAML diff config file (replaces `cu os ydiff`).",
-            show_default=False,
-        ),
-    ] = None,
     query: Annotated[
         str | None,
         typer.Option(
@@ -107,18 +93,17 @@ def diff_cmd(
         ),
     ] = None,
     print_schema: Annotated[
-        SchemaTarget | None,
+        bool,
         typer.Option(
             "--print-schema",
             help=(
-                "Print config JSON schema as YAML and exit. "
-                "Choices: diff (cu_diff.yml format), ydiff (--ydiff format). "
+                "Print the cu_diff.yml JSON schema as YAML and exit. "
                 "Useful for AI/CLI agents to understand and generate valid config files: "
                 "pipe the output to an LLM with your file list to auto-generate cu_diff.yml."
             ),
-            show_default=False,
+            is_flag=True,
         ),
-    ] = None,
+    ] = False,
 ) -> None:
     """
     [bold cyan]Semantic diff[/bold cyan] — compare JSON, YAML, or TOML config files structurally.
@@ -132,10 +117,6 @@ def diff_cmd(
       cu diff --config diff_config.yaml
 
     \b
-    JMESPath-based YAML diff (formerly `cu os ydiff`):
-      cu diff --ydiff ydiff_config.yaml
-
-    \b
     Common flags:
       --unified / -u             git-diff style output instead of table
       --ignore-key metadata      suppress paths containing 'metadata'
@@ -144,22 +125,10 @@ def diff_cmd(
       -q spec.replicas           show only diffs under a path prefix
       -q "[?kind=='changed']"    JMESPath filter on diff entries
     """
-    if print_schema is not None:
-        import yaml as _yaml
-
-        if print_schema == SchemaTarget.diff:
-            schema = DiffConfig.model_json_schema()
-        else:
-            from cloudutil.os_utils.yaml_diff import DiffCheckConfig
-
-            schema = DiffCheckConfig.model_json_schema()
-
-        print(_yaml.dump(schema, default_flow_style=False, sort_keys=False))
+    if print_schema:
+        schema = DiffConfig.model_json_schema()
+        print(yaml.dump(schema, default_flow_style=False, sort_keys=False))
         raise typer.Exit(0)
-
-    if ydiff:
-        _ydiff.run(ydiff)
-        return
 
     if files and config:
         _err("Use either -f flags or a config file argument, not both.")
@@ -170,9 +139,7 @@ def diff_cmd(
         if default.exists():
             config = default
         else:
-            _err(
-                "Specify -f <file> -f <file>, --config <cu_diff.yml>, or --ydiff <ydiff_config.yaml>."
-            )
+            _err("Specify -f <file> -f <file> or --config <cu_diff.yml>.")
             raise typer.Exit(1)
 
     # --unified beats --format; fall back to config.format or table default

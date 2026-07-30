@@ -38,7 +38,8 @@ A single static binary — `fzf` is compiled in, so there is nothing else to ins
     - [Kubernetes Operations](#kubernetes-operations)
       - [Kubernetes Secrets](#kubernetes-secrets)
       - [Kubernetes ConfigMaps](#kubernetes-configmaps)
-      - [Kubernetes Cluster Context Switching](#kubernetes-cluster-context-switching)
+      - [Pod Logs](#pod-logs)
+      - [Kubernetes Context and Namespace Switching](#kubernetes-context-and-namespace-switching)
     - [OS Utils](#os-utils)
       - [Shell History](#shell-history)
     - [Semantic Diff](#semantic-diff)
@@ -54,12 +55,12 @@ A single static binary — `fzf` is compiled in, so there is nothing else to ins
 
 - 🚀 **Interactive AWS Console Login** - Generate federated console URLs with a scoped IAM policy file
 - 🔐 **SSM Parameter Management** - Search and retrieve parameters with fuzzy finding
-- 📡 **SSM Instance Connections** - Direct SSH and port forwarding through Systems Manager
+- 📡 **SSM Instance Connections** - Interactive shell and port forwarding through Systems Manager, no SSH key or open port needed
 - 🔑 **Secrets Manager Integration** - Interactive secret browsing with JSON formatting
 - 🎯 **Fuzzy Selection** - Real `fzf`, compiled into the binary — no separate install, and your `$FZF_DEFAULT_OPTS` still apply
 - 🎨 **Beautiful Output** - Colored tables and diffs, with status on stderr so stdout stays pipeable
 - ⚡ **Profile & Region Support** - Seamless switching between AWS profiles and regions (where supported per command)
-- 🎛️ **Kubernetes Operations** - Interactive Kubernetes secrets and ConfigMaps browsing via `kubectl`
+- 🎛️ **Kubernetes Operations** - Interactive secrets and ConfigMaps browsing, multi-pod log streaming, and context/namespace switching via `kubectl`
 - 🧰 **OS Utils** - Shell history search
 - 🔍 **Semantic Diff** - Structural diff of JSON, YAML, TOML, and HCL/Terraform config files. Table or unified output, N-way comparison, smart env-pattern ignore, JMESPath filtering, and auto-detection of `cu_diff.yml`
 - 🗂️ **Taskfile Passthrough** - Run local Taskfile tasks via `cu task ...` with interactive terminal support
@@ -99,18 +100,20 @@ certainly already have:
 
 ### Shell Completion
 
+Add one line to your shell's rc file:
+
 ```bash
-# zsh — add to ~/.zshrc, or write to a directory on $fpath
-source <(cu completion zsh)
+# ~/.bashrc
+eval "$(cu completion bash)"
 
-# bash
-source <(cu completion bash)
+# ~/.zshrc — after 'autoload -U compinit && compinit'
+eval "$(cu completion zsh)"
 
-# fish
+# ~/.config/fish/config.fish
 cu completion fish | source
 ```
 
-`cu completion --help` covers permanent installation for each shell.
+Then restart your shell. `cu completion --help` prints the same list.
 
 ## 🚀 Usage
 
@@ -123,7 +126,7 @@ The main entrypoint is `cu`. Subcommands are wired in `internal/cli/root.go`:
 | `cu aws` | `internal/cli/aws.go` | AWS (login, SSM, Secrets Manager, decode message) |
 | `cu az` | `internal/cli/azure.go` | Azure Key Vault secrets |
 | `cu os` | `internal/cli/os.go` | Shell history search |
-| `cu k` | `internal/cli/k8s.go` | Kubernetes secrets, ConfigMaps, context switch |
+| `cu k` | `internal/cli/k8s.go` | Kubernetes secrets, ConfigMaps, pod logs, context and namespace switch |
 | `cu diff` | `internal/cli/diff.go` | Semantic diff of JSON, YAML, TOML, and HCL config files |
 | `cu pwpush` | `internal/cli/pwpush.go` | Password Pusher |
 | `cu task` | `internal/cli/task.go` | Passthrough to the `task` binary |
@@ -147,7 +150,12 @@ cu aws login -f ./read-only-policy.json --no-open
 
 **Example output:**
 ```
-[*] Opening URL in your default web browser...
+[*] Using policy from file: ./read-only-policy.json
+[*] Using AWS (profile: default, region: us-east-1)
+[*] Requesting federation token for 'you' (duration: 7200s)...
+[+] Federation token received.
+[+] Console login URL generated (session valid for 7200s).
+[*] Opening URL in your default browser (xdg-open)...
 [+] Done. Check your browser.
 ```
 
@@ -166,20 +174,18 @@ cu aws ssm-parameters --prefix /app/production/
 cu aws ssm-parameters --prefix /app/ --profile prod --region eu-west-1
 ```
 
+Multi-select with `Tab`. The selection is printed to stdout as one JSON object
+keyed by parameter name; the status lines go to stderr, so `| jq` sees only the
+data.
+
 **Example workflow:**
 ```
 [*] Listing SSM parameters with prefix: /app/production/
-[*] Found 24 parameters. Opening fzf for selection...
-[*] Retrieving 3 selected parameters...
-[+] Parameters retrieved successfully.
+[*] Found 24 SSM parameter(s). Opening fzf for selection...
 
 {
-  "name": "/app/production/database/host",
-  "value": "prod-db.example.com"
-}
-{
-  "name": "/app/production/api/key",
-  "value": "secret-api-key-value"
+  "/app/production/api/endpoint": "https://api.internal.example.com",
+  "/app/production/api/key": "secret-api-key-value"
 }
 ```
 
@@ -217,22 +223,21 @@ cu aws secrets --filter "prod/"
 cu aws secrets --filter "app/" --profile production --region us-east-1
 ```
 
+A secret whose value parses as a JSON object is nested in the output; anything
+else is passed through as a plain string.
+
 **Example output:**
 ```
-[*] Found 12 secrets. Opening fzf for selection...
-[*] Retrieving 2 selected secrets...
-[+] Secrets retrieved successfully.
+[*] Listing secrets with filter: prod/
+[*] Found 12 AWS secret(s). Opening fzf for selection...
 
-
-Name: 'prod/database/credentials'
-Description: 'Production database credentials'
-ARN: 'arn:aws:secretsmanager:us-east-1:123456789012:secret:prod/database/credentials-AbCdEf'
-Value (JSON):
 {
-  "username": "admin",
-  "password": "super-secure-password",
-  "host": "prod-db.example.com",
-  "port": 5432
+  "prod/service/credentials": {
+    "username": "svc-app",
+    "password": "super-secure-password",
+    "endpoint": "https://api.internal.example.com"
+  },
+  "prod/api/webhook-url": "https://hooks.example.com/T00000/B00000"
 }
 ```
 
@@ -248,28 +253,15 @@ cu aws decode-message
 cu aws decode-message --message "AQAA...<encoded message>..."
 ```
 
-**Example output:**
+STS's decoded payload is printed to stdout verbatim — `cu` does not reshape it,
+so pipe it to `jq` if you want it formatted.
+
+**Example output** (abridged):
 ```
-{
-  "allowed_actions": [],
-  "denied_actions": [
-    {
-      "actions": ["s3:GetObject"],
-      "api_call": "GetObject",
-      "main_type": "s3",
-      "condition": {},
-      "resource": "arn:aws:s3:::my-bucket/*",
-      "type": "s3",
-      "condition_text": "",
-      "effective_action": "s3:GetObject",
-      "reason": "Access Denied",
-      "encoded_error_message": "Access Denied"
-    }
-  ],
-  "encoded_message": "AQAA...",
-  "decoded_error": "Access Denied",
-  "decoded_message": "The provided authorization message is invalid or has expired."
-}
+{"allowed":false,"explicitDeny":true,"matchedStatements":{"items":[]},
+ "failures":{"items":[]},
+ "context":{"principal":{"id":"AROA...:session","arn":"arn:aws:sts::123456789012:assumed-role/dev/session"},
+            "action":"s3:GetObject","resource":"arn:aws:s3:::my-bucket/*"}}
 ```
 
 #### Advanced AWS Usage
@@ -335,11 +327,14 @@ cu az secrets --vault my-key-vault -o json
 [+] Secrets retrieved successfully.
 
 Name: 'prod-db-password'
-Content Type: 'password'
+Description: 'password'
 ID: 'https://my-key-vault.vault.azure.net/secrets/prod-db-password/...'
-Value:
-super-secret-value
+Value: super-secret-value
+────────────────────────────────────────────────────────────────────────
 ```
+
+`Description` carries the secret's Key Vault content type. As with AWS, a value
+that parses as a JSON object is printed as nested JSON instead of a raw string.
 
 ### Kubernetes Operations
 
@@ -347,12 +342,16 @@ Browse Kubernetes resources interactively using `fzf`. Selected resources are pr
 
 For **Secrets** and **ConfigMaps**, `fzf` lists **one line per data key**: `namespace/name/key`. Choosing a line prints **only that key’s value** (secrets are base64-decoded).
 
+Namespace resolution is the same everywhere: `-A` searches every namespace, `-n
+<ns>` searches that one, and with neither flag you get whatever your current
+context points at — exactly what bare `kubectl get` would do.
+
 #### Kubernetes Secrets
 
 View and inspect Secret keys. Each key appears as `namespace/secret-name/key`; values are base64-decoded when shown.
 
 ```bash
-# Scan secrets across all namespaces
+# Scan the current context's namespace
 cu k secrets
 
 # Scan a specific namespace
@@ -367,12 +366,12 @@ cu k secrets -A
 cu k secrets --select-namespace
 ```
 
-**Example output** (one selected key):
+**Example output** (two selected keys — the JSON is keyed by the full
+`namespace/name/key` path, so multi-select stays unambiguous):
 ```
 {
-  "default/app-secret": {
-    "DATABASE_URL": "postgres://app:***@db:5432/app"
-  }
+  "default/app-secret/API_TOKEN": "s3cr3t",
+  "default/app-secret/WEBHOOK_URL": "https://hooks.example.com/T00000"
 }
 ```
 
@@ -381,7 +380,7 @@ cu k secrets --select-namespace
 View and inspect ConfigMap keys. Each key appears as `namespace/configmap-name/key`, with the same namespace flags as secrets.
 
 ```bash
-# Scan ConfigMaps across all namespaces
+# Scan the current context's namespace
 cu k configmaps
 
 # Scan a specific namespace
@@ -405,18 +404,63 @@ cu k configmaps --select-namespace
 }
 ```
 
-#### Kubernetes Cluster Context Switching
+#### Pod Logs
 
-Switch kube contexts interactively using `fzf`.
+Fuzzy-pick pods and stream their logs — a `kubectl logs` front end, not a
+reimplementation.
+
+```bash
+# Pick pods in the current namespace and print their logs
+cu k logs
+
+# Follow a specific namespace, last 100 lines per pod
+cu k logs -n prod -f --tail 100
+
+# Follow across every namespace and keep a copy on disk
+cu k logs -A -f -o app.log
+```
+
+| Flag | Meaning |
+|------|---------|
+| `-n`, `--namespace` | Namespace to search (default: the current context's) |
+| `-A`, `--all-namespaces` | Search every namespace |
+| `-f`, `--follow` | Stream new lines as they arrive |
+| `-t`, `--tail` | Recent lines per pod (`-1`, the default, means the whole log) |
+| `-o`, `--output` | **Also** write the stream to this file — it tees, it does not redirect |
+
+Pods are listed as `namespace/name (phase)`, so typing `crash` finds the
+CrashLoopBackOff one. `Tab` selects several. When more than one stream is in
+play — several pods, or one pod with several containers — kubectl's `--prefix`
+is switched on so every line says where it came from:
+
+```
+[pod/api-7d9f-abc/app]   {"level":"info","msg":"listening on :8080"}
+[pod/api-7d9f-xyz/app]   {"level":"warn","msg":"retrying upstream"}
+```
+
+Concurrent streams are merged a whole line at a time, so two pods logging at
+once can never tear each other's output mid-line.
+
+#### Kubernetes Context and Namespace Switching
+
+`ctx` is a `kubectx` equivalent and `ns` a `kubens` one.
 
 ```bash
 # Pick a context from kubeconfig and switch to it
 cu k ctx
+
+# Pick a namespace and make it the current context's default
+cu k ns
+
+# Skip fzf entirely — handy in scripts
+cu k ctx prod-cluster
+cu k ns staging
 ```
 
 Notes:
-- Context names are read from your current kubeconfig (`kubectl config view -o json`).
-- The selected context is applied with `kubectl config use-context` (process is replaced via `exec`).
+- Contexts come from `kubectl config get-contexts -o name`, namespaces from `kubectl get namespaces -o name`.
+- `ctx` applies the choice with `kubectl config use-context`; `ns` uses `kubectl config set-context --current --namespace`. kubectl's confirmation goes to stderr.
+- Neither validates a name passed as an argument — kubectl accepts any string for `--namespace`, so a typo sets a namespace that does not exist.
 
 ### OS Utils
 
@@ -457,7 +501,7 @@ cu diff -f prod.yaml -f stage.yaml
 ├───┼──────────────────┼─────────────────────┼─────────────────────┤
 │ ~ │  app.port        │  8080               │  9090               │
 │ ~ │  app.version     │  '1.0.0'            │  '2.0.0'            │
-│ + │  database.ssl    │  —                  │  True               │
+│ + │  cache.enabled   │  —                  │  True               │
 ╰───┴──────────────────┴─────────────────────┴─────────────────────╯
 
   +  added   -  removed   ~  changed
@@ -608,8 +652,9 @@ cu task --help
 Manage temporary secret sharing with [Password Pusher](https://pwpush.com/).
 
 ```bash
-# Save Password Pusher config (requires --token, --source, and --email)
-cu pwpush config --source https://pwpush.com --token <api-token> --email you@example.com
+# Save Password Pusher config (--token and --source required; --email only for
+# self-hosted instances still on legacy header auth)
+cu pwpush config --source https://pwpush.com --token <api-token>
 
 # Send a secret (opens $EDITOR if --file is omitted)
 cu pwpush send --note "prod db password" --days 7 --views 5
@@ -625,7 +670,7 @@ cu pwpush pwgen --length 24
 ```
 
 Notes:
-- Config is stored at `~/.config/cu/psst.json`.
+- Config is stored at `~/.config/cu/psst.json`, mode `0600` — it holds an API token.
 - `send` uses bearer auth when no email is stored in config; legacy header auth when `email` is present in the saved config.
 
 ## 🎯 Interactive Selection
@@ -648,7 +693,7 @@ and `$FZF_DEFAULT_OPTS_FILE` are honored exactly as usual.
 | `cu aws` | `login`, `ssm-parameters`, `ec2-ssm`, `secrets`, `decode-message` |
 | `cu az` | `secrets` |
 | `cu os` | `history` |
-| `cu k` | `secrets`, `configmaps`, `ctx` |
+| `cu k` | `secrets`, `configmaps`, `logs`, `ctx`, `ns` |
 | `cu diff` | `-f <a> -f <b>`, `--config <config.yaml>` |
 | `cu pwpush` | `config`, `send`, `list-active`, `pwgen` |
 | `cu task` | forwards to `task -t <taskfile> -d <dir> ...` |
@@ -671,10 +716,13 @@ go build -o cu .
 go run . --help
 
 # Tests, vet and formatting
-go test ./...
-go vet ./...
-gofmt -l .
+task test     # go test ./... with the race detector
+task lint     # gofmt + go vet
+task build    # build the cu binary
+task release  # local goreleaser snapshot into dist/
 ```
+
+`task --list-all` shows the rest.
 
 ### Layout
 
@@ -687,6 +735,7 @@ internal/kube/       kubectl invocations
 internal/pick/       fzf, embedded via its Input/Output channels
 internal/ui/         styles, tables, rules; stderr for status, stdout for data
 tests/assets/        fixtures shared by the Go tests
+_archive/            the Python implementation cu replaced; inert, see its README
 ```
 
 ---

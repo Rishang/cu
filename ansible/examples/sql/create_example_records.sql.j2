@@ -1,6 +1,0 @@
-{# Renders into custom_sql.query via {% include %}. template_context supplies
-   schema and table; the role's Jinja environment loads from loader_path. #}
-CREATE TABLE IF NOT EXISTS {{ schema }}.{{ table }} (
-    id    integer PRIMARY KEY,
-    value text NOT NULL
-);

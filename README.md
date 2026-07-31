@@ -60,7 +60,7 @@ A single static binary — `fzf` is compiled in, so there is nothing else to ins
 - 🎯 **Fuzzy Selection** - Real `fzf`, compiled into the binary — no separate install, and your `$FZF_DEFAULT_OPTS` still apply
 - 🎨 **Beautiful Output** - Colored tables and diffs, with status on stderr so stdout stays pipeable
 - ⚡ **Profile & Region Support** - Seamless switching between AWS profiles and regions (where supported per command)
-- 🎛️ **Kubernetes Operations** - Interactive secrets and ConfigMaps browsing, multi-pod log streaming, and context/namespace switching via `kubectl`
+- 🎛️ **Kubernetes Operations** - Interactive secrets and ConfigMaps browsing, pod log streaming with a live preview panel, and context/namespace switching via `kubectl`
 - 🧰 **OS Utils** - Shell history search
 - 🔍 **Semantic Diff** - Structural diff of JSON, YAML, TOML, and HCL/Terraform config files. Table or unified output, N-way comparison, smart env-pattern ignore, JMESPath filtering, and auto-detection of `cu_diff.yml`
 - 🗂️ **Taskfile Passthrough** - Run local Taskfile tasks via `cu task ...` with interactive terminal support
@@ -406,18 +406,18 @@ cu k configmaps --select-namespace
 
 #### Pod Logs
 
-Fuzzy-pick pods and stream their logs — a `kubectl logs` front end, not a
+Fuzzy-pick a pod and stream its logs — a `kubectl logs` front end, not a
 reimplementation.
 
 ```bash
-# Pick pods in the current namespace and print their logs
+# Pick a pod in the current namespace and print its logs
 cu k logs
 
-# Follow a specific namespace, last 100 lines per pod
+# Follow a specific namespace, last 100 lines
 cu k logs -n prod -f --tail 100
 
-# Follow across every namespace and keep a copy on disk
-cu k logs -A -f -o app.log
+# Search every namespace, follow, redirect to a file
+cu k logs -A -f > app.log
 ```
 
 | Flag | Meaning |
@@ -425,21 +425,40 @@ cu k logs -A -f -o app.log
 | `-n`, `--namespace` | Namespace to search (default: the current context's) |
 | `-A`, `--all-namespaces` | Search every namespace |
 | `-f`, `--follow` | Stream new lines as they arrive |
-| `-t`, `--tail` | Recent lines per pod (`-1`, the default, means the whole log) |
-| `-o`, `--output` | **Also** write the stream to this file — it tees, it does not redirect |
+| `-t`, `--tail` | Recent lines to show (`-1`, the default, means the whole log) |
+
+Logs go to stdout and the status lines to stderr, so `> file`, `| grep` and
+`| jq` all work without a flag for it.
+
+The picker carries a preview panel on the right showing the last 50 lines of
+whichever pod is highlighted, so you can find the one actually misbehaving
+before committing to it:
+
+```
+▌ kube-system/coredns-589f44dc88-qvpq4 (Running)  │ maxprocs: Leaving GOMAXPROCS=12: CPU quota undefined
+▌ kube-system/coredns-589f44dc88-q9znc (Running)  │ .:53
+  2/13 ───────────────────────────────────────────│ CoreDNS-1.14.2
+pod> coredns                                      │ linux/amd64, go1.26.1, dd1df4f
+```
+
+Long lines wrap, with continuations indented rather than marked. The panel is
+resizable: **drag its left border** with the mouse, or cycle 75% / 25% / 50%
+with **ctrl-]** if you would rather not reach for it. **ctrl-o** hides it
+entirely — worth knowing, since it costs one `kubectl logs` call per cursor
+move.
+
+Its depth is fixed at 50 lines and does not follow `--tail` — it is there to
+tell pods apart, not to read the log.
 
 Pods are listed as `namespace/name (phase)`, so typing `crash` finds the
-CrashLoopBackOff one. `Tab` selects several. When more than one stream is in
-play — several pods, or one pod with several containers — kubectl's `--prefix`
-is switched on so every line says where it came from:
+CrashLoopBackOff one. Selection is single: one pod, one stream. A pod with
+several containers gets kubectl's `--prefix`, so every line says which container
+it came from:
 
 ```
-[pod/api-7d9f-abc/app]   {"level":"info","msg":"listening on :8080"}
-[pod/api-7d9f-xyz/app]   {"level":"warn","msg":"retrying upstream"}
+[pod/api-7d9f-abc/app]    {"level":"info","msg":"listening on :8080"}
+[pod/api-7d9f-abc/envoy]  [info] listener manager: all dependencies initialized
 ```
-
-Concurrent streams are merged a whole line at a time, so two pods logging at
-once can never tear each other's output mid-line.
 
 #### Kubernetes Context and Namespace Switching
 

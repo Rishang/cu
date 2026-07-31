@@ -6,7 +6,6 @@
 package kube
 
 import (
-	"bufio"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -18,7 +17,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 )
 
 // KeyRef identifies a single data key inside a Secret or ConfigMap.
@@ -240,70 +238,28 @@ func parsePods(data map[string]any) []Pod {
 	return pods
 }
 
-// StreamLogs runs `kubectl logs` for every pod and merges the output into w a
-// whole line at a time, so concurrent streams cannot interleave mid-line.
+// StreamLogs runs `kubectl logs` for one pod, writing straight through to w.
 //
-// kubectl's own --prefix does the labelling whenever more than one stream is in
-// play; there is no reason to reimplement it here.
-// tail is passed straight through to kubectl, where -1 means the whole log.
-func StreamLogs(pods []Pod, follow bool, tail int, w io.Writer) error {
-	lines := make(chan string, 256)
-	failures := make(chan error, len(pods))
-	var wg sync.WaitGroup
-
-	for _, pod := range pods {
-		args := []string{
-			"logs", pod.Name, "-n", pod.Namespace,
-			"--all-containers=true", "--tail=" + strconv.Itoa(tail),
-		}
-		if follow {
-			args = append(args, "--follow")
-		}
-		if len(pods) > 1 || len(pod.Containers) > 1 {
-			args = append(args, "--prefix")
-		}
-
-		cmd := exec.Command("kubectl", args...)
-		cmd.Stderr = os.Stderr // kubectl explains its own failures
-		stdout, err := cmd.StdoutPipe()
-		if err != nil {
-			return err
-		}
-		if err := cmd.Start(); err != nil {
-			return fmt.Errorf("could not start kubectl logs for %s/%s: %w", pod.Namespace, pod.Name, err)
-		}
-
-		wg.Go(func() {
-			scanner := bufio.NewScanner(stdout)
-			// Log lines can be long: stack traces, embedded JSON.
-			scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-			for scanner.Scan() {
-				lines <- scanner.Text()
-			}
-			if err := cmd.Wait(); err != nil {
-				failures <- fmt.Errorf("%s/%s: %w", pod.Namespace, pod.Name, err)
-			}
-		})
+// kubectl's own --prefix labels the lines when the pod has several containers;
+// there is no reason to reimplement it here. tail is passed through untouched,
+// where -1 means the whole log.
+func StreamLogs(pod Pod, follow bool, tail int, w io.Writer) error {
+	args := []string{
+		"logs", pod.Name, "-n", pod.Namespace,
+		"--all-containers=true", "--tail=" + strconv.Itoa(tail),
+	}
+	if follow {
+		args = append(args, "--follow")
+	}
+	if len(pod.Containers) > 1 {
+		args = append(args, "--prefix")
 	}
 
-	go func() {
-		wg.Wait()
-		close(lines)
-		close(failures)
-	}()
-
-	for line := range lines {
-		fmt.Fprintln(w, line)
-	}
-
-	// kubectl already printed each reason to stderr, so only a total washout is
-	// worth turning into an error.
-	var errs []error
-	for err := range failures {
-		errs = append(errs, err)
-	}
-	if len(errs) == len(pods) {
-		return errors.Join(errs...)
+	cmd := exec.Command("kubectl", args...)
+	cmd.Stdout = w
+	cmd.Stderr = os.Stderr // kubectl explains its own failures
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("kubectl logs %s/%s: %w", pod.Namespace, pod.Name, err)
 	}
 	return nil
 }

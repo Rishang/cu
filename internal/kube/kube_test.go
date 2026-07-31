@@ -49,8 +49,7 @@ func TestParsePods(t *testing.T) {
 }
 
 // stubKubectl puts a fake kubectl at the front of PATH for the duration of a
-// test. It echoes one line per iteration, in two writes, so a naive merge that
-// forwards raw chunks would tear lines apart.
+// test, emitting eight identifiable log lines.
 func stubKubectl(t *testing.T) {
 	t.Helper()
 	if _, err := exec.LookPath("sh"); err != nil {
@@ -66,32 +65,58 @@ func stubKubectl(t *testing.T) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
-func TestStreamLogsMergesWholeLines(t *testing.T) {
+func TestStreamLogsWritesPodOutput(t *testing.T) {
 	stubKubectl(t)
 
 	var buf bytes.Buffer
-	pods := []Pod{
-		{Namespace: "prod", Name: "api-1", Containers: []string{"app"}},
-		{Namespace: "prod", Name: "api-2", Containers: []string{"app"}},
-	}
-	if err := StreamLogs(pods, false, -1, &buf); err != nil {
+	pod := Pod{Namespace: "prod", Name: "api-1", Containers: []string{"app"}}
+	if err := StreamLogs(pod, false, 8, &buf); err != nil {
 		t.Fatalf("StreamLogs: %v", err)
 	}
 
-	counts := map[string]int{}
-	for line := range strings.SplitSeq(strings.TrimRight(buf.String(), "\n"), "\n") {
-		name, number, ok := strings.Cut(strings.TrimPrefix(line, "["), "] line ")
-		if !ok || number == "" {
-			t.Fatalf("torn or malformed line: %q", line)
-		}
-		counts[name]++
+	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
+	if len(lines) != 8 {
+		t.Fatalf("got %d lines, want 8: %q", len(lines), buf.String())
 	}
-	if counts["api-1"] != 8 || counts["api-2"] != 8 {
-		t.Errorf("got %v, want 8 lines from each pod", counts)
+	for _, line := range lines {
+		if !strings.HasPrefix(line, "[api-1] line ") {
+			t.Fatalf("unexpected line %q", line)
+		}
 	}
 }
 
-func TestStreamLogsReportsTotalFailure(t *testing.T) {
+// A single container must not get --prefix; several must.
+func TestStreamLogsPrefixesOnlyMultiContainerPods(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		containers []string
+		wantPrefix bool
+	}{
+		{"one container", []string{"app"}, false},
+		{"sidecar", []string{"app", "envoy"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			// Echo the argv back so the test can assert on the flags.
+			if err := os.WriteFile(filepath.Join(dir, "kubectl"),
+				[]byte("#!/bin/sh\necho \"$@\"\n"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+			var buf bytes.Buffer
+			pod := Pod{Namespace: "prod", Name: "api-1", Containers: tc.containers}
+			if err := StreamLogs(pod, false, -1, &buf); err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Contains(buf.String(), "--prefix"); got != tc.wantPrefix {
+				t.Errorf("--prefix present = %v, want %v (argv: %s)", got, tc.wantPrefix, buf.String())
+			}
+		})
+	}
+}
+
+func TestStreamLogsReportsFailure(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "kubectl"),
 		[]byte("#!/bin/sh\nexit 1\n"), 0o700); err != nil {
@@ -99,7 +124,7 @@ func TestStreamLogsReportsTotalFailure(t *testing.T) {
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	err := StreamLogs([]Pod{{Namespace: "prod", Name: "api-1"}}, false, -1, &bytes.Buffer{})
+	err := StreamLogs(Pod{Namespace: "prod", Name: "api-1"}, false, -1, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "prod/api-1") {
 		t.Errorf("got %v, want an error naming the pod", err)
 	}

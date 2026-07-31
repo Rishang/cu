@@ -1,9 +1,6 @@
 package cli
 
 import (
-	"io"
-	"os"
-
 	"github.com/spf13/cobra"
 
 	"github.com/Rishang/cloudutil/internal/kube"
@@ -30,26 +27,37 @@ func newK8sCommand() *cobra.Command {
 	return cmd
 }
 
+// logsPreview fills the fzf side panel with the tail of whichever pod is
+// highlighted. fzf substitutes {} with the selected line — "namespace/name
+// (phase)", already shell-quoted — so the panel takes it back apart.
+//
+// The depth is fixed at 50 rather than following --tail: the panel is for
+// telling pods apart, not for reading the log. 2>&1 so that a pod which is not
+// ready yet explains itself in the panel instead of showing an empty box.
+const logsPreview = `line={}; ns=${line%%/*}; rest=${line#*/}; ` +
+	`kubectl logs --tail=50 --all-containers=true -n "$ns" "${rest%% *}" 2>&1`
+
 func newKubeLogsCommand() *cobra.Command {
 	var (
 		allNamespaces bool
 		namespace     string
 		follow        bool
-		outFile       string
 		tail          int
 	)
 
 	cmd := &cobra.Command{
 		Use:   "logs",
-		Short: "Fuzzy-pick pods and stream their logs",
-		Long: `Pick one or more pods with fzf and stream their logs.
+		Short: "Fuzzy-pick a pod and stream its logs",
+		Long: `Pick a pod with fzf and stream its logs.
 
-Selecting several pods, or a pod with several containers, turns on kubectl's
---prefix so every line says where it came from. Lines from concurrent streams
-are merged whole, never interleaved mid-line.
+The side panel shows the last 50 lines of whichever pod is highlighted, so you
+can find the one misbehaving before committing to it. ctrl-o hides the panel.
 
-  cu k logs -n prod -f            # pick pods in prod, then follow
-  cu k logs -A -f -o app.log      # follow across all namespaces, tee to a file`,
+A pod with several containers gets kubectl's --prefix, so every line says which
+container it came from.
+
+  cu k logs -n prod -f -t 100     # pick a pod in prod, follow the last 100 lines
+  cu k logs -A -f > app.log       # search all namespaces, follow, redirect to a file`,
 		Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if allNamespaces {
@@ -72,24 +80,12 @@ are merged whole, never interleaved mid-line.
 			}
 
 			selected, err := pickFrom(pods, kube.Pod.Display, "pod",
-				pick.Options{Multi: true, Prompt: "pod> "})
+				pick.Options{Prompt: "pod> ", Preview: logsPreview})
 			if err != nil || len(selected) == 0 {
 				return err
 			}
 
-			out := ui.Out
-			if outFile != "" {
-				f, err := os.Create(outFile)
-				if err != nil {
-					return err
-				}
-				defer f.Close()
-				// Tee rather than redirect: watching the stream is the point,
-				// keeping a copy is the extra.
-				out = io.MultiWriter(ui.Out, f)
-				ui.Info("Also writing to %s", ui.Cyan.Render(outFile))
-			}
-			return kube.StreamLogs(selected, follow, tail, out)
+			return kube.StreamLogs(selected[0], follow, tail, ui.Out)
 		},
 	}
 
@@ -99,7 +95,6 @@ are merged whole, never interleaved mid-line.
 		"Namespace to search (ignored with --all-namespaces).")
 	flags.BoolVarP(&follow, "follow", "f", false, "Stream new log lines as they arrive.")
 	flags.IntVarP(&tail, "tail", "t", -1, "Show only this many recent lines per pod (-1 for all).")
-	flags.StringVarP(&outFile, "output", "o", "", "Also write the log stream to this file.")
 	return cmd
 }
 

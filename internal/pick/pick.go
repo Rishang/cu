@@ -15,6 +15,37 @@ import (
 type Options struct {
 	Multi  bool
 	Prompt string
+	// Preview is a shell command whose output fills a side panel for whichever
+	// line is highlighted. fzf substitutes {} with that line, already quoted.
+	Preview string
+}
+
+// fzfArgs turns Options into fzf's own flags.
+func fzfArgs(opts Options) []string {
+	args := []string{"--exact"}
+	if opts.Multi {
+		args = append(args, "--multi")
+	}
+	if opts.Prompt != "" {
+		args = append(args, "--prompt="+opts.Prompt)
+	}
+	if opts.Preview != "" {
+		args = append(args,
+			"--preview="+opts.Preview,
+			// One fixed position, no responsive alternative: fzf re-resolves a
+			// size threshold every frame, so a pane sitting near the boundary
+			// flips layout as you type. The border doubles as the drag handle
+			// for resizing, and mouse support is on by default.
+			"--preview-window=right,50%,wrap",
+			// A leading arrow on every continuation line is noisy for wrapped
+			// logs; indent them instead.
+			"--preview-wrap-sign=  ",
+			// The preview costs a subprocess per cursor move, so make it easy
+			// to get rid of, and give the mouseless a way to resize it.
+			"--bind=ctrl-o:toggle-preview",
+			"--bind=ctrl-]:change-preview-window(right,75%|right,25%|right,50%)")
+	}
+	return args
 }
 
 // Select presents items in fzf and returns the ones chosen. An empty result
@@ -34,14 +65,7 @@ func Select[T any](items []T, label func(T) string, opts Options) ([]T, error) {
 		}
 	}
 
-	args := []string{"--exact"}
-	if opts.Multi {
-		args = append(args, "--multi")
-	}
-	if opts.Prompt != "" {
-		args = append(args, "--prompt="+opts.Prompt)
-	}
-	lines, err := runFZF(labels, args)
+	lines, err := runFZF(labels, fzfArgs(opts))
 	if err != nil {
 		return nil, err
 	}

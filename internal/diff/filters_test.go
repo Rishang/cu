@@ -287,3 +287,20 @@ func TestSortByPathDoesNotMutateInput(t *testing.T) {
 		t.Errorf("output not sorted: %v", keptPaths(sorted))
 	}
 }
+
+// A projection returns rows the filter cannot map back to entries; keeping
+// nothing would print as "no differences".
+func TestQueryRejectsNonEntryResults(t *testing.T) {
+	entries := []Entry{{Path: []any{"spec", "replicas"}, Kind: KindChanged, Old: int64(2), New: int64(3)}}
+	for _, q := range []string{"[].path", "[?kind=='changed'].path"} {
+		if _, err := Query(entries, q); err == nil {
+			t.Errorf("Query(%q) succeeded, want an error explaining the shape", q)
+		}
+	}
+	if got, err := Query(entries, "[?kind=='changed']"); err != nil || len(got) != 1 {
+		t.Errorf("Query kept %d entries, err %v", len(got), err)
+	}
+	if got, err := Query(entries, "[?kind=='added']"); err != nil || len(got) != 0 {
+		t.Errorf("no-match query: kept %d, err %v", len(got), err)
+	}
+}

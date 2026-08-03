@@ -106,3 +106,23 @@ func TestNormalizeKeepsNulls(t *testing.T) {
 		t.Errorf("other = %v, want val", got["other"])
 	}
 }
+
+// NaN != NaN, so a file compared with itself must not report a change, and the
+// JSON renderer must have something it can encode.
+func TestNormalizeNonFiniteFloats(t *testing.T) {
+	for _, tc := range []struct {
+		in   float64
+		want string
+	}{
+		{math.NaN(), "NaN"},
+		{math.Inf(1), "+Inf"},
+		{math.Inf(-1), "-Inf"},
+	} {
+		if got := normalize(tc.in); got != tc.want {
+			t.Errorf("normalize(%v) = %#v, want %q", tc.in, got, tc.want)
+		}
+	}
+	if diffs := Compute(map[string]any{"x": math.NaN()}, map[string]any{"x": math.NaN()}); len(diffs) != 0 {
+		t.Errorf("NaN vs NaN = %v, want no differences", diffs)
+	}
+}

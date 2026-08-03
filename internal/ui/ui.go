@@ -80,6 +80,10 @@ func ColorEnabled() bool { return colorEnabled }
 
 var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
+// TextWidth returns the rendered column width of s, for callers doing their own
+// alignment. Not to be confused with width(), the terminal's width.
+func TextWidth(s string) int { return visibleWidth(s) }
+
 // visibleWidth returns the rendered column width of s, ignoring escape codes.
 func visibleWidth(s string) int {
 	return runewidth.StringWidth(ansiPattern.ReplaceAllString(s, ""))

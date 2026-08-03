@@ -103,6 +103,10 @@ func diffValues(a, b any, path []any) []Entry {
 		if numEqual(a, b) {
 			return nil
 		}
+	case kindNil, kindBool, kindStr:
+		if a == b {
+			return nil
+		}
 	default:
 		// DeepEqual rather than ==: kindOther covers whatever a parser hands
 		// back (go-toml dates, say), and == panics on uncomparable types.

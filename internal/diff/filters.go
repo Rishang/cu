@@ -111,6 +111,13 @@ func Query(entries []Entry, query string) ([]Entry, error) {
 		}
 	}
 
+	// A projection like `[].path` or `length(@)` returns rows the filter cannot
+	// map back to entries. Silently keeping nothing would read as "no
+	// differences", so say what went wrong instead.
+	if len(keep) == 0 && len(rows) > 0 {
+		return nil, fmt.Errorf("JMESPath query %q must return whole diff entries, not %T values — try a filter like [?kind=='changed']", query, rows[0])
+	}
+
 	var out []Entry
 	for _, e := range entries {
 		if _, ok := keep[e.PathStr()+"\x00"+string(e.Kind)]; ok {

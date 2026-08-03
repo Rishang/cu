@@ -1,7 +1,10 @@
 package diff
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -93,7 +96,11 @@ func LoadConfig(path string) (*Config, error) {
 	}
 
 	cfg := &Config{}
-	if err := yaml.Unmarshal(data, cfg); err != nil {
+	// Strict: a typo like `ignore_key:` would otherwise parse fine and silently
+	// suppress nothing, which is exactly the failure the config exists to avoid.
+	// The schema below already promises additionalProperties: false.
+	// An empty file decodes to io.EOF; let Validate give it the better message.
+	if err := yaml.NewDecoder(bytes.NewReader(data), yaml.DisallowUnknownField()).Decode(cfg); err != nil && !errors.Is(err, io.EOF) {
 		return nil, err
 	}
 	if cfg.Format == "" {
@@ -219,9 +226,6 @@ example:
 `
 
 // SchemaYAML returns the cu_diff.yml schema as YAML.
-func SchemaYAML() ([]byte, error) {
-	if err := yaml.Unmarshal([]byte(schemaDoc), new(map[string]any)); err != nil {
-		return nil, fmt.Errorf("built-in schema is not valid YAML: %w", err)
-	}
-	return []byte(schemaDoc), nil
+func SchemaYAML() []byte {
+	return []byte(schemaDoc)
 }

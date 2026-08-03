@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"os"
 	"os/exec"
@@ -79,8 +80,8 @@ func LoadFile(path string) (any, error) {
 		}
 		return v, nil
 	default: // .yaml / .yml
-		var v any
-		if err := yaml.Unmarshal(data, &v); err != nil {
+		v, err := decodeYAML(data)
+		if err != nil {
 			return nil, fmt.Errorf("Invalid YAML in %q: %w", path, err)
 		}
 		return v, nil
@@ -95,7 +96,38 @@ func decodeJSON(data []byte) (any, error) {
 	if err := dec.Decode(&v); err != nil {
 		return nil, err
 	}
+	// Anything after the first value would be dropped, and a dropped half of a
+	// file reads as "no differences".
+	if dec.More() {
+		return nil, errors.New("unexpected data after the top-level value")
+	}
 	return v, nil
+}
+
+// decodeYAML keeps every document of a multi-document file: k8s manifests are
+// routinely '---' separated, and decoding only the first silently hides every
+// difference in the rest. One document stays a bare value; several become a
+// list, which the engine then compares document by document.
+func decodeYAML(data []byte) (any, error) {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	var docs []any
+	for {
+		var v any
+		if err := dec.Decode(&v); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return nil, err
+		}
+		docs = append(docs, v)
+	}
+	if len(docs) <= 1 { // an empty file is nil, not an empty list
+		if len(docs) == 0 {
+			return nil, nil
+		}
+		return docs[0], nil
+	}
+	return docs, nil
 }
 
 // branchCache keys resolved branches by directory: header and renderer both ask

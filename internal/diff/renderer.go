@@ -81,8 +81,8 @@ func renderUnified(entries []Entry, o RenderOptions, format valueFormatter) {
 
 		pad := 0
 		for _, ln := range lines {
-			if ln.key != "" && len(ln.key) > pad {
-				pad = len(ln.key)
+			if w := ui.TextWidth(ln.key); ln.key != "" && w > pad {
+				pad = w
 			}
 		}
 		for _, ln := range lines {
@@ -120,7 +120,7 @@ func printLine(ln renderLine, pad int) {
 	b.WriteString("  ")
 	if ln.key != "" {
 		key := ln.key + ":"
-		if gap := pad + 1 - len(key); gap > 0 {
+		if gap := pad + 1 - ui.TextWidth(key); gap > 0 {
 			key += strings.Repeat(" ", gap)
 		}
 		b.WriteString(ln.keyStyle.Render(key))

@@ -79,11 +79,7 @@ Common flags:
 
 func runDiff(f *diffFlags) error {
 	if f.printSchema {
-		schema, err := diff.SchemaYAML()
-		if err != nil {
-			return err
-		}
-		fmt.Fprint(ui.Out, string(schema))
+		fmt.Fprint(ui.Out, string(diff.SchemaYAML()))
 		return nil
 	}
 

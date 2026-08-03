@@ -209,3 +209,46 @@ func assertErrContains(t *testing.T, err error, want string) {
 		t.Fatalf("error %q does not contain %q", err, want)
 	}
 }
+
+// Half a file silently dropped reads as "no differences", the worst way for a
+// diff tool to be wrong.
+func TestLoadFileKeepsWholeFile(t *testing.T) {
+	t.Run("multi-document yaml", func(t *testing.T) {
+		got, err := LoadFile(write(t, "m.yaml", "kind: ConfigMap\n---\nkind: Secret\n"))
+		if err != nil {
+			t.Fatalf("LoadFile: %v", err)
+		}
+		want := []any{
+			map[string]any{"kind": "ConfigMap"},
+			map[string]any{"kind": "Secret"},
+		}
+		if !reflect.DeepEqual(normalize(got), want) {
+			t.Fatalf("got %#v, want %#v", got, want)
+		}
+	})
+
+	t.Run("single document stays bare", func(t *testing.T) {
+		got, err := LoadFile(write(t, "s.yaml", "---\nkind: ConfigMap\n"))
+		if err != nil {
+			t.Fatalf("LoadFile: %v", err)
+		}
+		if !reflect.DeepEqual(normalize(got), map[string]any{"kind": "ConfigMap"}) {
+			t.Fatalf("got %#v", got)
+		}
+	})
+
+	t.Run("empty yaml is null", func(t *testing.T) {
+		got, err := LoadFile(write(t, "e.yaml", ""))
+		if err != nil {
+			t.Fatalf("LoadFile: %v", err)
+		}
+		if got != nil {
+			t.Fatalf("got %#v, want nil", got)
+		}
+	})
+
+	t.Run("trailing json is an error", func(t *testing.T) {
+		_, err := LoadFile(write(t, "t.json", "{\"a\": 1}\n{\"a\": 999}\n"))
+		assertErrContains(t, err, "unexpected data after the top-level value")
+	})
+}

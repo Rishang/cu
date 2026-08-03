@@ -1,8 +1,11 @@
 package diff
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	yaml "github.com/goccy/go-yaml"
@@ -137,10 +140,7 @@ func TestLoadConfigErrors(t *testing.T) {
 // Diff and nobody documenting it. Walk the struct tags and demand a property
 // for each — this is the guard that lets the schema stay a literal.
 func TestSchemaCoversEveryField(t *testing.T) {
-	raw, err := SchemaYAML()
-	if err != nil {
-		t.Fatalf("SchemaYAML: %v", err)
-	}
+	raw := SchemaYAML()
 
 	// It must round-trip as YAML, since agents are told to parse it.
 	var schema struct {
@@ -181,4 +181,16 @@ func keySet[V any](m map[string]V) map[string]bool {
 		out[k] = true
 	}
 	return out
+}
+
+// A mistyped key used to parse fine and suppress nothing.
+func TestLoadConfigRejectsUnknownKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cu_diff.yml")
+	if err := os.WriteFile(path, []byte("globl_ignore_keys: [image]\ndiffs:\n  - files: [a.yaml, b.yaml]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := LoadConfig(path)
+	if err == nil || !strings.Contains(err.Error(), "globl_ignore_keys") {
+		t.Fatalf("expected an unknown-field error naming the typo, got %v", err)
+	}
 }

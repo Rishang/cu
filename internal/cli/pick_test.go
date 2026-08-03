@@ -18,14 +18,7 @@ func filterMode(t *testing.T, query string) *bytes.Buffer {
 	t.Helper()
 	t.Setenv("FZF_DEFAULT_OPTS", "--filter="+query)
 
-	out := &bytes.Buffer{}
-	prevOut, prevErr, prevColor := ui.Out, ui.Err, ui.ColorEnabled()
-	ui.Out, ui.Err = out, &bytes.Buffer{}
-	ui.SetColor(false)
-	t.Cleanup(func() {
-		ui.Out, ui.Err = prevOut, prevErr
-		ui.SetColor(prevColor)
-	})
+	out, _ := captureUI(t)
 	return out
 }
 

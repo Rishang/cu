@@ -14,12 +14,12 @@ func asset(name string) string {
 	return filepath.Join("..", "..", "tests", "assets", name)
 }
 
-// runCu executes the command tree with args and returns stdout, stderr and the
-// resulting exit code (0 when the command succeeded).
-func runCu(t *testing.T, args ...string) (stdout, stderr string, code int) {
+// captureUI redirects ui.Out/ui.Err to fresh buffers, disables color, and
+// restores both once the test ends.
+func captureUI(t *testing.T) (outBuf, errBuf *bytes.Buffer) {
 	t.Helper()
 
-	outBuf, errBuf := &bytes.Buffer{}, &bytes.Buffer{}
+	outBuf, errBuf = &bytes.Buffer{}, &bytes.Buffer{}
 	prevOut, prevErr, prevColor := ui.Out, ui.Err, ui.ColorEnabled()
 	ui.Out, ui.Err = outBuf, errBuf
 	ui.SetColor(false)
@@ -27,6 +27,15 @@ func runCu(t *testing.T, args ...string) (stdout, stderr string, code int) {
 		ui.Out, ui.Err = prevOut, prevErr
 		ui.SetColor(prevColor)
 	})
+	return outBuf, errBuf
+}
+
+// runCu executes the command tree with args and returns stdout, stderr and the
+// resulting exit code (0 when the command succeeded).
+func runCu(t *testing.T, args ...string) (stdout, stderr string, code int) {
+	t.Helper()
+
+	outBuf, errBuf := captureUI(t)
 
 	root := NewRootCommand()
 	root.SetArgs(args)

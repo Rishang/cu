@@ -49,6 +49,14 @@ func normalize(v any) any {
 			return t.String()
 		}
 		return f
+	case float64:
+		// NaN != NaN, so a file compared against itself would diff forever, and
+		// neither NaN nor ±Inf has a JSON literal to render. Their YAML spelling
+		// ("NaN", "+Inf", "-Inf") compares and prints.
+		if math.IsNaN(t) || math.IsInf(t, 0) {
+			return fmt.Sprint(t)
+		}
+		return t
 	case int:
 		return int64(t)
 	case int64:

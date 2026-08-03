@@ -64,7 +64,7 @@ func renderUnified(entries []Entry, o RenderOptions, format valueFormatter) {
 	}
 
 	groups := map[string][]Entry{}
-	for _, e := range SortByPath(entries) {
+	for _, e := range sortByPath(entries) {
 		section := "(root)"
 		if len(e.Path) > 0 {
 			section = fmt.Sprint(e.Path[0])
@@ -272,7 +272,7 @@ func renderTable(entries []Entry, o RenderOptions, format valueFormatter) {
 
 	dash := ui.Text("—", ui.Dim)
 	var added, removed, changed int
-	for _, e := range SortByPath(entries) {
+	for _, e := range sortByPath(entries) {
 		var oldCell, newCell ui.Cell
 		sym, symStyle := "~", ui.Yellow
 		switch e.Kind {
@@ -366,7 +366,7 @@ func renderJSON(entries []Entry, o RenderOptions) {
 	out := jsonOutput{Diffs: []jsonEntry{}}
 	out.Files.Old = jsonFileMeta{File: o.FileA, Branch: o.BranchA}
 	out.Files.New = jsonFileMeta{File: o.FileB, Branch: o.BranchB}
-	for _, e := range SortByPath(entries) {
+	for _, e := range sortByPath(entries) {
 		out.Diffs = append(out.Diffs, jsonEntry{
 			Path: e.PathStr(), Kind: string(e.Kind), Old: e.Old, New: e.New,
 		})
@@ -390,7 +390,7 @@ func renderIgnored(ignored []Entry) {
 		return
 	}
 	ui.Print(ui.Dim.Sprintf("⊘  Ignored (%d) — matched ignore rules", len(ignored)))
-	for _, e := range SortByPath(ignored) {
+	for _, e := range sortByPath(ignored) {
 		ui.Print(ui.Dim.Render("   ~ " + e.PathStr()))
 	}
 	ui.Print("")
@@ -450,10 +450,7 @@ func formatValue(v any) string {
 	case string:
 		return "'" + t + "'"
 	case map[string]any, []any:
-		if s, ok := compactJSON(t); ok {
-			return s
-		}
-		return fmt.Sprint(t)
+		return compactJSON(t)
 	default:
 		return fmt.Sprint(t)
 	}
@@ -495,12 +492,13 @@ func formatHCL(v any) string {
 	}
 }
 
-func compactJSON(v any) (string, bool) {
+// compactJSON renders a container on one line. The error is dropped because
+// everything reaching here has been through normalize: maps, slices and scalars
+// only, nothing json.Marshal can refuse.
+func compactJSON(v any) string {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
-	if err := enc.Encode(v); err != nil {
-		return "", false
-	}
-	return strings.TrimRight(buf.String(), "\n"), true
+	_ = enc.Encode(v)
+	return strings.TrimRight(buf.String(), "\n")
 }

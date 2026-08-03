@@ -3,6 +3,7 @@ package diff
 import (
 	"fmt"
 	"maps"
+	"reflect"
 	"slices"
 	"strings"
 )
@@ -47,7 +48,7 @@ func (e Entry) PathStr() string {
 
 // Compute normalizes both sides then walks them for structural differences.
 func Compute(a, b any) []Entry {
-	return diffValues(Normalize(a), Normalize(b), nil)
+	return diffValues(normalize(a), normalize(b), nil)
 }
 
 type valKind int
@@ -84,9 +85,10 @@ func kindOf(v any) valKind {
 func diffValues(a, b any, path []any) []Entry {
 	ka, kb := kindOf(a), kindOf(b)
 	if ka != kb {
-		// Same rendered value across types is not a difference — YAML quoting
-		// alone should not show up as a diff (port: "8080" vs port: 8080).
-		if scalarString(a) == scalarString(b) {
+		// A quoted number is the same value as a bare one, so port: 8080 and
+		// port: "8080" must not read as a diff. The shortcut stops at numbers:
+		// null vs "" and true vs "true" are genuinely different values.
+		if numAndString(ka, kb) && scalarString(a) == scalarString(b) {
 			return nil
 		}
 		return []Entry{{Path: clonePath(path), Kind: KindTypeChanged, Old: a, New: b}}
@@ -102,7 +104,9 @@ func diffValues(a, b any, path []any) []Entry {
 			return nil
 		}
 	default:
-		if a == b {
+		// DeepEqual rather than ==: kindOther covers whatever a parser hands
+		// back (go-toml dates, say), and == panics on uncomparable types.
+		if reflect.DeepEqual(a, b) {
 			return nil
 		}
 	}
@@ -155,6 +159,12 @@ func clonePath(path []any) []any {
 	out := make([]any, len(path), len(path)+1)
 	copy(out, path)
 	return out
+}
+
+// numAndString reports whether the two kinds are a number and a string, in
+// either order.
+func numAndString(a, b valKind) bool {
+	return (a == kindNum && b == kindStr) || (a == kindStr && b == kindNum)
 }
 
 // numEqual compares numbers across the int64/float64 split, so 1 and 1.0 match.

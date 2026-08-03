@@ -6,40 +6,37 @@ import (
 	"math"
 )
 
-// Normalize canonicalizes parsed config data so values coming from different
+// normalize canonicalizes parsed config data so values coming from different
 // file formats compare cleanly:
 //
 //   - every map becomes map[string]any (YAML can yield non-string keys)
-//   - every slice becomes []any
 //   - every number becomes int64 when integral, float64 otherwise
+//
+// The numeric cases cover what the parsers in loader.go actually hand back:
+// json.Number from JSON and HCL, int64/uint64/float64 from YAML and TOML, plus
+// plain int for values built in Go. Anything else passes through untouched.
 //
 // Key ordering is deliberately not part of this: Go maps are unordered and the
 // engine iterates keys sorted, which is what the Python version's key sorting
 // was actually for.
-func Normalize(v any) any {
+func normalize(v any) any {
 	switch t := v.(type) {
 	case map[string]any:
 		out := make(map[string]any, len(t))
 		for k, val := range t {
-			out[k] = Normalize(val)
+			out[k] = normalize(val)
 		}
 		return out
 	case map[any]any:
 		out := make(map[string]any, len(t))
 		for k, val := range t {
-			out[fmt.Sprint(k)] = Normalize(val)
+			out[fmt.Sprint(k)] = normalize(val)
 		}
 		return out
 	case []any:
 		out := make([]any, len(t))
 		for i, val := range t {
-			out[i] = Normalize(val)
-		}
-		return out
-	case []string:
-		out := make([]any, len(t))
-		for i, s := range t {
-			out[i] = s
+			out[i] = normalize(val)
 		}
 		return out
 	case json.Number:
@@ -54,34 +51,15 @@ func Normalize(v any) any {
 		return f
 	case int:
 		return int64(t)
-	case int8:
-		return int64(t)
-	case int16:
-		return int64(t)
-	case int32:
-		return int64(t)
 	case int64:
 		return t
-	case uint:
-		return uintToNum(uint64(t))
-	case uint8:
-		return int64(t)
-	case uint16:
-		return int64(t)
-	case uint32:
-		return int64(t)
 	case uint64:
-		return uintToNum(t)
-	case float32:
+		// YAML hands back positive integers as uint64, which can overflow int64.
+		if t <= math.MaxInt64 {
+			return int64(t)
+		}
 		return float64(t)
 	default:
 		return v
 	}
-}
-
-func uintToNum(u uint64) any {
-	if u <= math.MaxInt64 {
-		return int64(u)
-	}
-	return float64(u)
 }

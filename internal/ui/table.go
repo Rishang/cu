@@ -22,8 +22,8 @@ type Cell []Segment
 // Text builds a single-style cell.
 func Text(s string, style Style) Cell { return Cell{{Text: s, Style: style}} }
 
-// Width returns the cell's unfolded display width.
-func (c Cell) Width() int {
+// width returns the cell's unfolded display width.
+func (c Cell) width() int {
 	w := 0
 	for _, seg := range c {
 		w += runewidth.StringWidth(seg.Text)
@@ -88,7 +88,6 @@ type Table struct {
 	// falls on the value columns rather than on paths. They are only shrunk as
 	// a last resort, when the other columns are already at their floor.
 	NoShrink []bool
-	MinWidth int   // per-column floor when shrinking, defaults to 6
 	MaxWidth int   // total width, defaults to the terminal width
 	Border   Style // style for the box drawing characters
 }
@@ -135,33 +134,29 @@ func (t *Table) Render(w io.Writer) {
 func (t *Table) columnWidths(cols int) []int {
 	widths := make([]int, cols)
 	for i, h := range t.Headers {
-		widths[i] = h.Width()
+		widths[i] = h.width()
 	}
 	for _, row := range t.Rows {
 		for i, c := range row {
-			if i < cols && c.Width() > widths[i] {
-				widths[i] = c.Width()
+			if i < cols && c.width() > widths[i] {
+				widths[i] = c.width()
 			}
 		}
 	}
 
 	maxWidth := t.MaxWidth
 	if maxWidth <= 0 {
-		maxWidth = Width()
-	}
-	minWidth := t.MinWidth
-	if minWidth <= 0 {
-		minWidth = 6
+		maxWidth = width()
 	}
 
 	// Overhead: one vertical rule per column plus a closing one, and a space of
 	// padding on each side of every cell.
 	budget := maxWidth - (cols + 1) - 2*cols
 	for total(widths) > budget {
-		idx := t.widestShrinkable(widths, minWidth, false)
+		idx := t.widestShrinkable(widths, false)
 		if idx < 0 {
 			// Only protected columns are left with room to give.
-			idx = t.widestShrinkable(widths, minWidth, true)
+			idx = t.widestShrinkable(widths, true)
 		}
 		if idx < 0 {
 			break // every column is at its floor
@@ -171,12 +166,15 @@ func (t *Table) columnWidths(cols int) []int {
 	return widths
 }
 
+// minColumnWidth is the floor a column is never shrunk below.
+const minColumnWidth = 6
+
 // widestShrinkable returns the index of the widest column still above the floor,
 // skipping protected columns unless includeProtected is set.
-func (t *Table) widestShrinkable(widths []int, minWidth int, includeProtected bool) int {
+func (t *Table) widestShrinkable(widths []int, includeProtected bool) int {
 	widest, idx := 0, -1
 	for i, cw := range widths {
-		if cw <= minWidth || cw <= widest {
+		if cw <= minColumnWidth || cw <= widest {
 			continue
 		}
 		if !includeProtected && i < len(t.NoShrink) && t.NoShrink[i] {
@@ -228,7 +226,7 @@ func (t *Table) renderRow(w io.Writer, row []Cell, widths []int) {
 }
 
 func (t *Table) pad(content string, width, col int) string {
-	gap := width - VisibleWidth(content)
+	gap := width - visibleWidth(content)
 	if gap < 0 {
 		gap = 0
 	}
@@ -255,7 +253,7 @@ func Columns(w io.Writer, headers []string, values []string, styles []Style) {
 	}
 	widths := make([]int, len(headers))
 	for i := range headers {
-		widths[i] = max(VisibleWidth(headers[i]), VisibleWidth(values[i]))
+		widths[i] = max(visibleWidth(headers[i]), visibleWidth(values[i]))
 	}
 
 	var head, body strings.Builder
@@ -274,7 +272,7 @@ func Columns(w io.Writer, headers []string, values []string, styles []Style) {
 }
 
 func padRight(s string, width int) string {
-	if gap := width - VisibleWidth(s); gap > 0 {
+	if gap := width - visibleWidth(s); gap > 0 {
 		return s + strings.Repeat(" ", gap)
 	}
 	return s

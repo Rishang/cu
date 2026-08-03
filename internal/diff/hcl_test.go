@@ -14,9 +14,9 @@ func TestLoadTFVars(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadFile: %v", err)
 	}
-	vars, ok := Normalize(data).(map[string]any)
+	vars, ok := normalize(data).(map[string]any)
 	if !ok {
-		t.Fatalf("got %T, want a map", Normalize(data))
+		t.Fatalf("got %T, want a map", normalize(data))
 	}
 
 	for _, key := range []string{"region", "instance_type", "replica_count", "enable_dns", "tags"} {
@@ -49,8 +49,8 @@ func TestLoadHCLExtension(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadFile: %v", err)
 	}
-	if !reflect.DeepEqual(Normalize(got), map[string]any{"key": "value"}) {
-		t.Fatalf("got %#v", Normalize(got))
+	if !reflect.DeepEqual(normalize(got), map[string]any{"key": "value"}) {
+		t.Fatalf("got %#v", normalize(got))
 	}
 }
 
@@ -64,9 +64,9 @@ func TestLoadTFBlocks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadFile: %v", err)
 	}
-	root, ok := Normalize(data).(map[string]any)
+	root, ok := normalize(data).(map[string]any)
 	if !ok {
-		t.Fatalf("got %T, want a map", Normalize(data))
+		t.Fatalf("got %T, want a map", normalize(data))
 	}
 
 	for _, key := range []string{"variable", "resource"} {

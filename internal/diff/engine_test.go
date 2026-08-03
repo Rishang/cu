@@ -151,6 +151,10 @@ func TestComputeTypeChanges(t *testing.T) {
 			map[string]any{"data": map[string]any{"key": "val"}},
 			map[string]any{"data": []any{"item"}}},
 		{"null vs string", map[string]any{"key": nil}, map[string]any{"key": "value"}},
+		// The quoted-number shortcut must not swallow these: an empty string is
+		// not a null, and the string "true" is not the boolean.
+		{"null vs empty string", map[string]any{"key": nil}, map[string]any{"key": ""}},
+		{"bool vs its own spelling", map[string]any{"on": true}, map[string]any{"on": "true"}},
 	}
 
 	for _, tc := range cases {

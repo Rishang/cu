@@ -3,7 +3,6 @@ package diff
 import (
 	"reflect"
 	"slices"
-	"strings"
 	"testing"
 
 	yaml "github.com/goccy/go-yaml"
@@ -134,26 +133,52 @@ func TestLoadConfigErrors(t *testing.T) {
 	})
 }
 
-func TestSchemaYAML(t *testing.T) {
+// The schema is hand-written, so the risk is a field being added to Config or
+// Diff and nobody documenting it. Walk the struct tags and demand a property
+// for each — this is the guard that lets the schema stay a literal.
+func TestSchemaCoversEveryField(t *testing.T) {
 	raw, err := SchemaYAML()
 	if err != nil {
 		t.Fatalf("SchemaYAML: %v", err)
 	}
 
 	// It must round-trip as YAML, since agents are told to parse it.
-	var parsed map[string]any
-	if err := yaml.Unmarshal(raw, &parsed); err != nil {
+	var schema struct {
+		Properties map[string]struct {
+			Items struct {
+				Properties map[string]any `yaml:"properties"`
+			} `yaml:"items"`
+		} `yaml:"properties"`
+		Example map[string]any `yaml:"example"`
+	}
+	if err := yaml.Unmarshal(raw, &schema); err != nil {
 		t.Fatalf("schema is not valid YAML: %v", err)
 	}
+	if len(schema.Example) == 0 {
+		t.Error("schema carries no usage example")
+	}
 
-	text := string(raw)
-	for _, want := range []string{
-		"diffs", "global_ignore_keys", "global_ignore_patterns", "format", "query",
-		"N-choose-2", // a field description made it through
-		"example",    // the usage example is attached
+	for _, tc := range []struct {
+		what       string
+		typ        reflect.Type
+		properties map[string]bool
+	}{
+		{"Config", reflect.TypeFor[Config](), keySet(schema.Properties)},
+		{"Diff", reflect.TypeFor[Diff](), keySet(schema.Properties["diffs"].Items.Properties)},
 	} {
-		if !strings.Contains(text, want) {
-			t.Errorf("schema is missing %q", want)
+		for i := range tc.typ.NumField() {
+			name := tc.typ.Field(i).Tag.Get("yaml")
+			if !tc.properties[name] {
+				t.Errorf("%s field %q has no schema property — document it in schemaDoc", tc.what, name)
+			}
 		}
 	}
+}
+
+func keySet[V any](m map[string]V) map[string]bool {
+	out := make(map[string]bool, len(m))
+	for k := range m {
+		out[k] = true
+	}
+	return out
 }

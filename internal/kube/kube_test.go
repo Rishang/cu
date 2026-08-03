@@ -31,7 +31,7 @@ func TestParsePods(t *testing.T) {
 		{"metadata": {"namespace": "prod"}, "spec": {}}
 	]}`
 
-	var data map[string]any
+	var data podList
 	if err := json.Unmarshal([]byte(raw), &data); err != nil {
 		t.Fatal(err)
 	}

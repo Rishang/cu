@@ -48,7 +48,33 @@ func pickFrom[T any](items []T, label func(T) string, noun string, opts pick.Opt
 
 // pickStrings is pickFrom for plain string lists.
 func pickStrings(items []string, noun string, opts pick.Options) ([]string, error) {
-	return pickFrom(items, func(s string) string { return s }, noun, opts)
+	return pickFrom(items, itself, noun, opts)
+}
+
+// itself labels a string list with itself.
+func itself(s string) string { return s }
+
+// pickAndPrint is the browse-a-secret-store flow: multi-select from items, fetch
+// each selection, and print the results as one JSON object. fetch returns the
+// key to file the result under along with the value, since what names an entry
+// differs per store.
+func pickAndPrint[T, V any](items []T, label func(T) string, noun, prompt string,
+	fetch func(T) (string, V, error),
+) error {
+	selected, err := pickFrom(items, label, noun, pick.Options{Multi: true, Prompt: prompt})
+	if err != nil || len(selected) == 0 {
+		return err
+	}
+
+	payload := make(map[string]V, len(selected))
+	for _, item := range selected {
+		key, value, err := fetch(item)
+		if err != nil {
+			return err
+		}
+		payload[key] = value
+	}
+	return ui.PrintJSON(payload)
 }
 
 // rootName is the installed binary name, used wherever help text has to spell

@@ -136,23 +136,11 @@ func newK8sKeyCommand(
 			if err != nil {
 				return err
 			}
-			selected, err := pickFrom(refs, kube.KeyRef.Display, itemName, pick.Options{
-				Multi:  true,
-				Prompt: use + "> ",
-			})
-			if err != nil || len(selected) == 0 {
-				return err
-			}
-
-			payload := map[string]string{}
-			for _, ref := range selected {
-				v, err := value(ref)
-				if err != nil {
-					return err
-				}
-				payload[ref.Display()] = v
-			}
-			return ui.PrintJSON(payload)
+			return pickAndPrint(refs, kube.KeyRef.Display, itemName, use+"> ",
+				func(ref kube.KeyRef) (string, string, error) {
+					v, err := value(ref)
+					return ref.Display(), v, err
+				})
 		},
 	}
 

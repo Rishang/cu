@@ -92,25 +92,3 @@ func TestSelectEmptyItems(t *testing.T) {
 		t.Fatalf("got %v, want nil", got)
 	}
 }
-
-type instance struct {
-	id   string
-	name string
-}
-
-// Select maps fzf's chosen lines back to the original domain objects.
-func TestSelectMapsLabelsBackToItems(t *testing.T) {
-	items := []instance{
-		{"i-111", "web"},
-		{"i-222", "worker"},
-	}
-	label := func(i instance) string { return i.id + " | " + i.name }
-
-	index := map[string]int{}
-	for i, item := range items {
-		index[label(item)] = i
-	}
-	if got := index["i-222 | worker"]; got != 1 {
-		t.Fatalf("label mapping resolved to %d, want 1", got)
-	}
-}

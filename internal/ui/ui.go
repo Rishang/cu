@@ -29,9 +29,6 @@ var (
 // Style is a set of ANSI SGR parameters, e.g. "1;31" for bold red.
 type Style struct{ code string }
 
-// newStyle builds a style from raw SGR parameters.
-func newStyle(code string) Style { return Style{code: code} }
-
 // Render wraps text in this style's escape codes, or returns it unchanged when
 // color is disabled.
 func (s Style) Render(text string) string {
@@ -50,20 +47,20 @@ func (s Style) Sprintf(format string, a ...any) string {
 // highlights need specific dark backgrounds, so those use truecolor.
 var (
 	Plain      = Style{}
-	Red        = newStyle("31")
-	Green      = newStyle("32")
-	Yellow     = newStyle("33")
-	Cyan       = newStyle("36")
-	Bold       = newStyle("1")
-	Dim        = newStyle("2")
-	DimItalic  = newStyle("2;3")
-	BoldRed    = newStyle("1;31")
-	BoldGreen  = newStyle("1;32")
-	BoldYellow = newStyle("1;33")
-	BoldCyan   = newStyle("1;36")
+	Red        = Style{"31"}
+	Green      = Style{"32"}
+	Yellow     = Style{"33"}
+	Cyan       = Style{"36"}
+	Bold       = Style{"1"}
+	Dim        = Style{"2"}
+	DimItalic  = Style{"2;3"}
+	BoldRed    = Style{"1;31"}
+	BoldGreen  = Style{"1;32"}
+	BoldYellow = Style{"1;33"}
+	BoldCyan   = Style{"1;36"}
 	// Differing spans inside a changed value.
-	DelHighlight = newStyle("31;48;2;58;20;20")
-	AddHighlight = newStyle("32;48;2;20;58;28")
+	DelHighlight = Style{"31;48;2;58;20;20"}
+	AddHighlight = Style{"32;48;2;20;58;28"}
 )
 
 var colorEnabled = defaultColor()
@@ -83,13 +80,17 @@ func ColorEnabled() bool { return colorEnabled }
 
 var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
-// VisibleWidth returns the rendered column width of s, ignoring escape codes.
-func VisibleWidth(s string) int {
+// visibleWidth returns the rendered column width of s, ignoring escape codes.
+func visibleWidth(s string) int {
 	return runewidth.StringWidth(ansiPattern.ReplaceAllString(s, ""))
 }
 
-// Width returns the terminal width, defaulting to 80 when it is unknown.
-func Width() int {
+// width returns the terminal width, defaulting to 80 when it is unknown.
+// $COLUMNS wins, so output stays reproducible when piped or under test.
+func width() int {
+	if w, err := strconv.Atoi(os.Getenv("COLUMNS")); err == nil && w > 0 {
+		return w
+	}
 	for _, f := range []*os.File{os.Stderr, os.Stdout} {
 		if w, _, err := term.GetSize(int(f.Fd())); err == nil && w > 0 {
 			return w
@@ -252,14 +253,14 @@ func jsonQuote(s string) string {
 // Rule draws a full-width horizontal rule with a centered title. The title is
 // expected to be pre-styled; line styles the dashes.
 func Rule(title string, line Style) {
-	w := Width()
+	w := width()
 	if title == "" {
 		Print(line.Render(strings.Repeat("─", w)))
 		return
 	}
 
 	label := " " + title + " "
-	inner := VisibleWidth(label)
+	inner := visibleWidth(label)
 	if inner >= w {
 		Print(label)
 		return

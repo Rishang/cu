@@ -21,7 +21,7 @@ type FilterRules struct {
 // First match suppresses: ignore keys before ignore patterns.
 func Apply(entries []Entry, r FilterRules) (kept, ignored []Entry) {
 	keys := slices.Concat(r.GlobalIgnoreKeys, r.LocalIgnoreKeys)
-	compiled := CompilePatterns(slices.Concat(r.GlobalIgnorePatterns, r.LocalIgnorePatterns))
+	compiled := compilePatterns(slices.Concat(r.GlobalIgnorePatterns, r.LocalIgnorePatterns))
 
 	for _, e := range entries {
 		switch {
@@ -39,11 +39,11 @@ func Apply(entries []Entry, r FilterRules) (kept, ignored []Entry) {
 // smartIgnore strips the configured tokens from both sides and ignores the
 // entry when what remains is identical — i.e. the marker token was the only
 // difference. Added and removed entries have no counterpart, so they stay.
-func smartIgnore(compiled Compiled, e Entry) bool {
+func smartIgnore(compiled patternSet, e Entry) bool {
 	if e.Kind == KindAdded || e.Kind == KindRemoved {
 		return false
 	}
-	return ValuesEqualAfterStripping(compiled, e.Old, e.New)
+	return valuesEqualAfterStripping(compiled, e.Old, e.New)
 }
 
 func pathHasKey(e Entry, ignoreKeys []string) bool {
@@ -132,7 +132,7 @@ func prefixFilter(entries []Entry, prefix string) []Entry {
 }
 
 // SortByPath orders entries by their rendered path, for stable output.
-func SortByPath(entries []Entry) []Entry {
+func sortByPath(entries []Entry) []Entry {
 	out := slices.Clone(entries)
 	slices.SortStableFunc(out, func(a, b Entry) int {
 		return strings.Compare(a.PathStr(), b.PathStr())

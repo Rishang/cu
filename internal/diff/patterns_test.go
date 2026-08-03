@@ -3,14 +3,14 @@ package diff
 import "testing"
 
 func TestCompilePatternsSplitsCommas(t *testing.T) {
-	compiled := CompilePatterns([]string{" dev, PROD ", "stage"})
+	compiled := compilePatterns([]string{" dev, PROD ", "stage"})
 	if len(compiled) != 3 {
 		t.Fatalf("want 3 compiled tokens, got %d", len(compiled))
 	}
 }
 
 func TestCompilePatternsIgnoresBlanks(t *testing.T) {
-	if got := CompilePatterns([]string{"", " , ,"}); len(got) != 0 {
+	if got := compilePatterns([]string{"", " , ,"}); len(got) != 0 {
 		t.Fatalf("want no tokens, got %d", len(got))
 	}
 }
@@ -40,9 +40,9 @@ func TestValuesEqualAfterStripping(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			compiled := CompilePatterns(tc.patterns)
-			if got := ValuesEqualAfterStripping(compiled, tc.left, tc.right); got != tc.want {
-				t.Fatalf("ValuesEqualAfterStripping(%v, %v) = %v, want %v",
+			compiled := compilePatterns(tc.patterns)
+			if got := valuesEqualAfterStripping(compiled, tc.left, tc.right); got != tc.want {
+				t.Fatalf("valuesEqualAfterStripping(%v, %v) = %v, want %v",
 					tc.left, tc.right, got, tc.want)
 			}
 		})
@@ -74,9 +74,9 @@ func TestStripAllBoundaries(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			compiled := CompilePatterns([]string{tc.pattern})
-			if got := StripAll(compiled, tc.input); got != tc.want {
-				t.Fatalf("StripAll(%q) = %q, want %q", tc.input, got, tc.want)
+			compiled := compilePatterns([]string{tc.pattern})
+			if got := stripAll(compiled, tc.input); got != tc.want {
+				t.Fatalf("stripAll(%q) = %q, want %q", tc.input, got, tc.want)
 			}
 		})
 	}
@@ -84,19 +84,19 @@ func TestStripAllBoundaries(t *testing.T) {
 
 // Tokens are matched literally, so regex metacharacters must not be special.
 func TestStripAllTreatsTokensAsLiterals(t *testing.T) {
-	compiled := CompilePatterns([]string{"a.c"})
-	if got := StripAll(compiled, "abc"); got != "abc" {
-		t.Errorf("StripAll(abc) = %q, want abc unchanged", got)
+	compiled := compilePatterns([]string{"a.c"})
+	if got := stripAll(compiled, "abc"); got != "abc" {
+		t.Errorf("stripAll(abc) = %q, want abc unchanged", got)
 	}
-	if got := StripAll(compiled, "a.c-x"); got != "-x" {
-		t.Errorf("StripAll(a.c-x) = %q, want -x", got)
+	if got := stripAll(compiled, "a.c-x"); got != "-x" {
+		t.Errorf("stripAll(a.c-x) = %q, want -x", got)
 	}
 }
 
 // Multibyte input must not be sliced mid-rune.
 func TestStripAllHandlesUnicode(t *testing.T) {
-	compiled := CompilePatterns([]string{"dev"})
-	if got := StripAll(compiled, "héllo-dev-wörld"); got != "héllo--wörld" {
+	compiled := compilePatterns([]string{"dev"})
+	if got := stripAll(compiled, "héllo-dev-wörld"); got != "héllo--wörld" {
 		t.Fatalf("got %q", got)
 	}
 }

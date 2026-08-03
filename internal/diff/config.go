@@ -1,13 +1,11 @@
 package diff
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 
 	yaml "github.com/goccy/go-yaml"
-	"github.com/invopop/jsonschema"
 )
 
 // Format is an output format for rendered diffs.
@@ -69,19 +67,19 @@ func splitTokens(values []string) Patterns {
 
 // Diff is one comparison entry: two or more files plus its local ignore rules.
 type Diff struct {
-	Files          []string `json:"files"                     yaml:"files"`
-	IgnoreKeys     []string `json:"ignore_keys,omitempty"     yaml:"ignore_keys"`
-	IgnorePatterns Patterns `json:"ignore_patterns,omitempty" yaml:"ignore_patterns"`
-	Query          string   `json:"query,omitempty"           yaml:"query"`
+	Files          []string `yaml:"files"`
+	IgnoreKeys     []string `yaml:"ignore_keys"`
+	IgnorePatterns Patterns `yaml:"ignore_patterns"`
+	Query          string   `yaml:"query"`
 }
 
 // Config is the cu_diff.yml file format.
 type Config struct {
-	Format               Format   `json:"format,omitempty"                 yaml:"format"`
-	Query                string   `json:"query,omitempty"                  yaml:"query"`
-	GlobalIgnoreKeys     []string `json:"global_ignore_keys,omitempty"     yaml:"global_ignore_keys"`
-	GlobalIgnorePatterns Patterns `json:"global_ignore_patterns,omitempty" yaml:"global_ignore_patterns"`
-	Diffs                []Diff   `json:"diffs"                            yaml:"diffs"`
+	Format               Format   `yaml:"format"`
+	Query                string   `yaml:"query"`
+	GlobalIgnoreKeys     []string `yaml:"global_ignore_keys"`
+	GlobalIgnorePatterns Patterns `yaml:"global_ignore_patterns"`
+	Diffs                []Diff   `yaml:"diffs"`
 }
 
 // LoadConfig reads and validates a cu_diff.yml file.
@@ -123,98 +121,107 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// JSONSchemaExtend documents the Diff fields for --print-schema consumers.
-func (Diff) JSONSchemaExtend(s *jsonschema.Schema) {
-	describe(s, map[string]string{
-		"files": "Two or more file paths to compare (JSON, YAML, TOML, or HCL). " +
-			"When 3+ files are given, all N-choose-2 pairs are compared. " +
-			"Paths are resolved relative to the config file location.",
-		"ignore_keys": "Suppress diff entries whose dot-separated path contains any of these key segments " +
-			"(exact segment match at any depth). Merged with global_ignore_keys.",
-		"ignore_patterns": "Environment/marker tokens to strip before comparing values. " +
-			"A changed entry is suppressed when both values, after stripping these tokens, are identical. " +
-			"Accepts a list or a comma-separated string (e.g. 'qa,prod,stage'). Merged with global_ignore_patterns.",
-		"query": "Filter diff entries for this pair only. " +
-			"Bare prefix: 'configmap.data' keeps only paths under that key. " +
-			"JMESPath expression: '[?kind==\"changed\"]' for arbitrary filtering. " +
-			"Overrides the top-level query for this pair.",
-	})
-}
+// schemaDoc is the cu_diff.yml schema, served by --print-schema so that humans
+// and agents can generate a valid config. It is written out rather than
+// reflected off the structs: the document never varies per run, and reflecting
+// it cost a dependency plus three of its own. TestSchemaCoversEveryField fails
+// if a field is added to Config or Diff without being documented here.
+const schemaDoc = `$schema: https://json-schema.org/draft/2020-12/schema
+description: Configuration file format for ` + "`cu diff --config`" + `.
+type: object
+additionalProperties: false
+required:
+  - diffs
+properties:
+  format:
+    type: string
+    enum: [unified, table, json]
+    default: table
+    description: >-
+      Output format: 'table' (default, rich table), 'unified' (git-diff style),
+      or 'json' (machine-readable). Overridden by --format / -o / --unified on
+      the command line.
+  query:
+    type: string
+    description: >-
+      Global filter applied to every diff pair. Bare prefix: 'configmap.data'
+      keeps only paths under that key. JMESPath expression: '[?kind=="changed"]'
+      for arbitrary filtering. Overridden by -q on the command line; per-pair
+      'query' takes precedence.
+  global_ignore_keys:
+    type: array
+    items: {type: string}
+    description: >-
+      Key segments to suppress across all diff pairs. A path is suppressed if
+      any segment matches at any depth (e.g. 'metadata' suppresses
+      'spec.metadata.name').
+  global_ignore_patterns:
+    type: array
+    items: {type: string}
+    description: >-
+      Environment/marker tokens stripped from values before comparing. A changed
+      entry is suppressed when both values are identical after stripping.
+      Accepts a list or a comma-separated string (e.g. 'qa,prod,stage').
+      Overridden by --ignore-pattern on the command line.
+  diffs:
+    type: array
+    description: >-
+      List of diff entries. Each entry compares two or more files. When 3+ files
+      are given, all N-choose-2 pairs are compared automatically.
+    items:
+      type: object
+      additionalProperties: false
+      required:
+        - files
+      properties:
+        files:
+          type: array
+          items: {type: string}
+          description: >-
+            Two or more file paths to compare (JSON, YAML, TOML, or HCL). When
+            3+ files are given, all N-choose-2 pairs are compared. Paths are
+            resolved relative to the config file location.
+        ignore_keys:
+          type: array
+          items: {type: string}
+          description: >-
+            Suppress diff entries whose dot-separated path contains any of these
+            key segments (exact segment match at any depth). Merged with
+            global_ignore_keys.
+        ignore_patterns:
+          type: array
+          items: {type: string}
+          description: >-
+            Environment/marker tokens to strip before comparing values. A
+            changed entry is suppressed when both values, after stripping these
+            tokens, are identical. Accepts a list or a comma-separated string
+            (e.g. 'qa,prod,stage'). Merged with global_ignore_patterns.
+        query:
+          type: string
+          description: >-
+            Filter diff entries for this pair only. Bare prefix:
+            'configmap.data' keeps only paths under that key. JMESPath
+            expression: '[?kind=="changed"]' for arbitrary filtering. Overrides
+            the top-level query for this pair.
+example:
+  format: table
+  query: configmap.data
+  global_ignore_keys: [metadata, status]
+  global_ignore_patterns: qa,prod,stage
+  diffs:
+    - files: [helm/admin/values-qa.yaml, helm/admin/values-prod.yaml]
+      ignore_keys: [timestamp]
+      query: configmap.data
+    - files:
+        - helm/app/values-dev.yaml
+        - helm/app/values-stage.yaml
+        - helm/app/values-prod.yaml
+`
 
-// JSONSchemaExtend documents the Config fields and attaches a usage example.
-func (Config) JSONSchemaExtend(s *jsonschema.Schema) {
-	describe(s, map[string]string{
-		"format": "Output format: 'table' (default, rich table), 'unified' (git-diff style), or 'json' (machine-readable). " +
-			"Overridden by --format / -o / --unified on the command line.",
-		"query": "Global filter applied to every diff pair. " +
-			"Bare prefix: 'configmap.data' keeps only paths under that key. " +
-			"JMESPath expression: '[?kind==\"changed\"]' for arbitrary filtering. " +
-			"Overridden by -q on the command line; per-pair 'query' takes precedence.",
-		"global_ignore_keys": "Key segments to suppress across all diff pairs. " +
-			"A path is suppressed if any segment matches at any depth " +
-			"(e.g. 'metadata' suppresses 'spec.metadata.name').",
-		"global_ignore_patterns": "Environment/marker tokens stripped from values before comparing. " +
-			"A changed entry is suppressed when both values are identical after stripping. " +
-			"Accepts a list or a comma-separated string (e.g. 'qa,prod,stage'). " +
-			"Overridden by --ignore-pattern on the command line.",
-		"diffs": "List of diff entries. Each entry compares two or more files. " +
-			"When 3+ files are given, all N-choose-2 pairs are compared automatically.",
-	})
-
-	if p, ok := s.Properties.Get("format"); ok {
-		p.Enum = []any{string(FormatUnified), string(FormatTable), string(FormatJSON)}
-		p.Default = string(DefaultFormat)
-	}
-
-	s.Extras = map[string]any{
-		"example": map[string]any{
-			"format":                 "table",
-			"query":                  "configmap.data",
-			"global_ignore_keys":     []string{"metadata", "status"},
-			"global_ignore_patterns": "qa,prod,stage",
-			"diffs": []map[string]any{
-				{
-					"files":       []string{"helm/admin/values-qa.yaml", "helm/admin/values-prod.yaml"},
-					"ignore_keys": []string{"timestamp"},
-					"query":       "configmap.data",
-				},
-				{
-					"files": []string{
-						"helm/app/values-dev.yaml",
-						"helm/app/values-stage.yaml",
-						"helm/app/values-prod.yaml",
-					},
-				},
-			},
-		},
-	}
-}
-
-func describe(s *jsonschema.Schema, descriptions map[string]string) {
-	if s.Properties == nil {
-		return
-	}
-	for name, text := range descriptions {
-		if p, ok := s.Properties.Get(name); ok {
-			p.Description = text
-		}
-	}
-}
-
-// SchemaYAML renders the cu_diff.yml JSON schema as YAML, for humans and for
-// agents generating config files.
+// SchemaYAML returns the cu_diff.yml schema as YAML.
 func SchemaYAML() ([]byte, error) {
-	reflector := &jsonschema.Reflector{ExpandedStruct: true, DoNotReference: true}
-	schema := reflector.Reflect(&Config{})
-	schema.Description = "Configuration file format for `cu diff --config`."
-
-	raw, err := json.Marshal(schema)
-	if err != nil {
-		return nil, err
+	if err := yaml.Unmarshal([]byte(schemaDoc), new(map[string]any)); err != nil {
+		return nil, fmt.Errorf("built-in schema is not valid YAML: %w", err)
 	}
-	var generic any
-	if err := json.Unmarshal(raw, &generic); err != nil {
-		return nil, err
-	}
-	return yaml.Marshal(generic)
+	return []byte(schemaDoc), nil
 }

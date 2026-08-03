@@ -20,14 +20,14 @@ func TestVisibleWidthIgnoresEscapeCodes(t *testing.T) {
 	if len(styled) <= len("hello") {
 		t.Fatal("expected the styled string to carry escape codes")
 	}
-	if got := VisibleWidth(styled); got != 5 {
-		t.Fatalf("VisibleWidth(%q) = %d, want 5", styled, got)
+	if got := visibleWidth(styled); got != 5 {
+		t.Fatalf("visibleWidth(%q) = %d, want 5", styled, got)
 	}
 }
 
 func TestVisibleWidthCountsWideRunes(t *testing.T) {
-	if got := VisibleWidth("日本"); got != 4 {
-		t.Fatalf("VisibleWidth(日本) = %d, want 4", got)
+	if got := visibleWidth("日本"); got != 4 {
+		t.Fatalf("visibleWidth(日本) = %d, want 4", got)
 	}
 }
 
@@ -88,8 +88,8 @@ func TestCellFoldUnicode(t *testing.T) {
 
 func TestCellWidth(t *testing.T) {
 	cell := Cell{{Text: "ab", Style: Red}, {Text: "cde", Style: Green}}
-	if got := cell.Width(); got != 5 {
-		t.Fatalf("Width() = %d, want 5", got)
+	if got := cell.width(); got != 5 {
+		t.Fatalf("width() = %d, want 5", got)
 	}
 }
 
@@ -128,12 +128,12 @@ func TestTableLinesAreAligned(t *testing.T) {
 	table.Render(&buf)
 
 	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
-	width := VisibleWidth(lines[0])
+	width := visibleWidth(lines[0])
 	if width > 40 {
 		t.Errorf("table is %d columns wide, want at most 40", width)
 	}
 	for i, line := range lines {
-		if got := VisibleWidth(line); got != width {
+		if got := visibleWidth(line); got != width {
 			t.Errorf("line %d is %d wide, want %d:\n%s", i, got, width, line)
 		}
 	}
@@ -217,7 +217,7 @@ func TestRuleFitsTerminalWidth(t *testing.T) {
 	if !strings.Contains(line, "PAIR 1/3") {
 		t.Fatalf("rule is missing its title: %q", line)
 	}
-	if got := VisibleWidth(line); got != Width() {
-		t.Errorf("rule is %d wide, want %d", got, Width())
+	if got := visibleWidth(line); got != width() {
+		t.Errorf("rule is %d wide, want %d", got, width())
 	}
 }

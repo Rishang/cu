@@ -49,8 +49,8 @@ Common flags:
   -q spec.replicas           show only diffs under a path prefix
   -q "[?kind=='changed']"    JMESPath filter on diff entries`,
 		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runDiff(cmd, f)
+		RunE: func(_ *cobra.Command, _ []string) error {
+			return runDiff(f)
 		},
 	}
 
@@ -77,7 +77,7 @@ Common flags:
 	return cmd
 }
 
-func runDiff(cmd *cobra.Command, f *diffFlags) error {
+func runDiff(f *diffFlags) error {
 	if f.printSchema {
 		schema, err := diff.SchemaYAML()
 		if err != nil {
@@ -89,8 +89,6 @@ func runDiff(cmd *cobra.Command, f *diffFlags) error {
 
 	if f.noColor || !f.color {
 		ui.SetColor(false)
-	} else if cmd.Flags().Changed("color") {
-		ui.SetColor(true)
 	}
 
 	if len(f.files) > 0 && f.config != "" {

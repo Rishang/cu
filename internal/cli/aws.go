@@ -159,21 +159,11 @@ func newSSMParametersCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			selected, err := pickStrings(names, "SSM parameter",
-				pick.Options{Multi: true, Prompt: "parameter> "})
-			if err != nil || len(selected) == 0 {
-				return err
-			}
-
-			payload := map[string]string{}
-			for _, name := range selected {
-				param, err := awsx.GetParameter(ctx, cfg, name)
-				if err != nil {
-					return err
-				}
-				payload[param.Name] = param.Value
-			}
-			return ui.PrintJSON(payload)
+			return pickAndPrint(names, itself, "SSM parameter", "parameter> ",
+				func(name string) (string, string, error) {
+					param, err := awsx.GetParameter(ctx, cfg, name)
+					return param.Name, param.Value, err
+				})
 		},
 	}
 
@@ -249,21 +239,13 @@ func newAWSSecretsCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			selected, err := pickStrings(names, "AWS secret",
-				pick.Options{Multi: true, Prompt: "secret> "})
-			if err != nil || len(selected) == 0 {
-				return err
-			}
-
-			payload := map[string]any{}
-			for _, name := range selected {
-				secret, err := awsx.GetSecret(ctx, cfg, name)
-				if err != nil {
-					return err
-				}
-				payload[secret.Name] = decodeSecretValue(secret.Value)
-			}
-			return ui.PrintJSON(payload)
+			// A JSON secret is nested in the output rather than escaped into a
+			// string, so jq can walk into it.
+			return pickAndPrint(names, itself, "AWS secret", "secret> ",
+				func(name string) (string, any, error) {
+					secret, err := awsx.GetSecret(ctx, cfg, name)
+					return secret.Name, decodeSecretValue(secret.Value), err
+				})
 		},
 	}
 

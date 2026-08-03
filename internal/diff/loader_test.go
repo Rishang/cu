@@ -30,8 +30,8 @@ func TestLoadFileJSON(t *testing.T) {
 			t.Fatalf("LoadFile: %v", err)
 		}
 		want := map[string]any{"key": "value", "num": int64(42)}
-		if !reflect.DeepEqual(Normalize(got), want) {
-			t.Fatalf("got %#v, want %#v", Normalize(got), want)
+		if !reflect.DeepEqual(normalize(got), want) {
+			t.Fatalf("got %#v, want %#v", normalize(got), want)
 		}
 	})
 
@@ -40,7 +40,7 @@ func TestLoadFileJSON(t *testing.T) {
 		if err != nil {
 			t.Fatalf("LoadFile: %v", err)
 		}
-		nested := Normalize(got).(map[string]any)["a"].(map[string]any)["b"]
+		nested := normalize(got).(map[string]any)["a"].(map[string]any)["b"]
 		if !reflect.DeepEqual(nested, []any{int64(1), int64(2), int64(3)}) {
 			t.Fatalf("got %#v", nested)
 		}
@@ -69,8 +69,8 @@ func TestLoadFileYAML(t *testing.T) {
 			t.Fatalf("LoadFile: %v", err)
 		}
 		want := map[string]any{"key": "value", "num": int64(42)}
-		if !reflect.DeepEqual(Normalize(got), want) {
-			t.Fatalf("got %#v, want %#v", Normalize(got), want)
+		if !reflect.DeepEqual(normalize(got), want) {
+			t.Fatalf("got %#v, want %#v", normalize(got), want)
 		}
 	})
 
@@ -79,8 +79,8 @@ func TestLoadFileYAML(t *testing.T) {
 		if err != nil {
 			t.Fatalf("LoadFile: %v", err)
 		}
-		if !reflect.DeepEqual(Normalize(got), map[string]any{"x": int64(1)}) {
-			t.Fatalf("got %#v", Normalize(got))
+		if !reflect.DeepEqual(normalize(got), map[string]any{"x": int64(1)}) {
+			t.Fatalf("got %#v", normalize(got))
 		}
 	})
 
@@ -89,7 +89,7 @@ func TestLoadFileYAML(t *testing.T) {
 		if err != nil {
 			t.Fatalf("LoadFile: %v", err)
 		}
-		spec := Normalize(got).(map[string]any)["spec"].(map[string]any)
+		spec := normalize(got).(map[string]any)["spec"].(map[string]any)
 		if spec["replicas"] != int64(3) {
 			t.Fatalf("replicas = %v (%T)", spec["replicas"], spec["replicas"])
 		}
@@ -110,7 +110,7 @@ func TestLoadFileYAML(t *testing.T) {
 		if err != nil {
 			t.Fatalf("LoadFile: %v", err)
 		}
-		m := Normalize(got).(map[string]any)
+		m := normalize(got).(map[string]any)
 		if m["key"] != nil || m["other"] != nil {
 			t.Fatalf("got %#v, want both nil", m)
 		}
@@ -121,8 +121,8 @@ func TestLoadFileYAML(t *testing.T) {
 		if err != nil {
 			t.Fatalf("LoadFile: %v", err)
 		}
-		if !reflect.DeepEqual(Normalize(got), []any{"a", "b", "c"}) {
-			t.Fatalf("got %#v", Normalize(got))
+		if !reflect.DeepEqual(normalize(got), []any{"a", "b", "c"}) {
+			t.Fatalf("got %#v", normalize(got))
 		}
 	})
 
@@ -139,7 +139,7 @@ func TestLoadFileTOML(t *testing.T) {
 		if err != nil {
 			t.Fatalf("LoadFile: %v", err)
 		}
-		server := Normalize(got).(map[string]any)["server"].(map[string]any)
+		server := normalize(got).(map[string]any)["server"].(map[string]any)
 		if server["host"] != "localhost" {
 			t.Errorf("host = %v", server["host"])
 		}

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
@@ -119,7 +120,7 @@ func newPwpushListActiveCommand() *cobra.Command {
 				return err
 			}
 
-			body, err := pwpushRequest(cmd, http.MethodGet, cfg, "/p/active.json", nil)
+			body, err := pwpushRequest(cmd.Context(), http.MethodGet, cfg, "/p/active.json", nil)
 			if err != nil {
 				return err
 			}
@@ -169,13 +170,12 @@ func newPwpushListActiveCommand() *cobra.Command {
 
 func newPwpushSendCommand() *cobra.Command {
 	var (
-		days         int
-		views        int
-		note         string
-		deletable    bool
-		notDeletable bool
-		file         string
-		kind         string
+		days      int
+		views     int
+		note      string
+		deletable bool
+		file      string
+		kind      string
 	)
 
 	cmd := &cobra.Command{
@@ -212,7 +212,7 @@ func newPwpushSendCommand() *cobra.Command {
 				"expire_after_days":     days,
 				"expire_after_views":    views,
 				"retrievable_by_viewer": 1,
-				"deletable_by_viewer":   boolToInt(deletable && !notDeletable),
+				"deletable_by_viewer":   boolToInt(deletable),
 				"kind":                  kind,
 			}
 			if note != "" {
@@ -223,7 +223,7 @@ func newPwpushSendCommand() *cobra.Command {
 				return err
 			}
 
-			response, err := pwpushRequest(cmd, http.MethodPost, cfg, "/p.json", body)
+			response, err := pwpushRequest(cmd.Context(), http.MethodPost, cfg, "/p.json", body)
 			if err != nil {
 				return err
 			}
@@ -253,10 +253,8 @@ func newPwpushSendCommand() *cobra.Command {
 	flags.IntVarP(&days, "days", "d", 7, "Expire after days.")
 	flags.IntVarP(&views, "views", "v", 5, "Expire after views.")
 	flags.StringVarP(&note, "note", "n", "", "Optional note.")
+	// No --not-deletable: --deletable=false already says it.
 	flags.BoolVar(&deletable, "deletable", true, "Allow the viewer to delete the push.")
-	// Kept for parity with the Python CLI; it is just the negation, so it binds
-	// its own variable and is folded in above rather than aliasing --deletable.
-	flags.BoolVar(&notDeletable, "not-deletable", false, "Do not allow the viewer to delete the push.")
 	flags.StringVarP(&file, "file", "f", "", "File to upload instead of opening an editor.")
 	flags.StringVarP(&kind, "kind", "k", "password", "Type: password, url, or qr.")
 	return cmd
@@ -330,13 +328,13 @@ func newPwgenCommand() *cobra.Command {
 }
 
 // pwpushRequest performs an authenticated API call and returns the response body.
-func pwpushRequest(cmd *cobra.Command, method string, cfg *pwpushConfig, path string, body []byte) ([]byte, error) {
+func pwpushRequest(ctx context.Context, method string, cfg *pwpushConfig, path string, body []byte) ([]byte, error) {
 	var reader io.Reader
 	if body != nil {
 		reader = bytes.NewReader(body)
 	}
 
-	req, err := http.NewRequestWithContext(cmd.Context(), method, cfg.Source+path, reader)
+	req, err := http.NewRequestWithContext(ctx, method, cfg.Source+path, reader)
 	if err != nil {
 		return nil, err
 	}

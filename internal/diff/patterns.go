@@ -7,15 +7,15 @@ import (
 	"unicode/utf8"
 )
 
-// Compiled holds ignore_patterns tokens as case-insensitive literal matchers.
-type Compiled []*regexp.Regexp
+// patternSet holds ignore_patterns tokens as case-insensitive literal matchers.
+type patternSet []*regexp.Regexp
 
 // CompilePatterns splits comma-separated tokens and compiles each as a
 // case-insensitive literal. Word boundaries are enforced at match time rather
 // than in the pattern: RE2 has no lookaround, so `(?<![A-Za-z0-9])` from the
 // Python version cannot be expressed here.
-func CompilePatterns(patterns []string) Compiled {
-	var compiled Compiled
+func compilePatterns(patterns []string) patternSet {
+	var compiled patternSet
 	for _, pattern := range patterns {
 		for token := range strings.SplitSeq(pattern, ",") {
 			token = strings.TrimSpace(token)
@@ -29,7 +29,7 @@ func CompilePatterns(patterns []string) Compiled {
 }
 
 // StripAll removes every configured token from s, one pattern at a time.
-func StripAll(c Compiled, s string) string {
+func stripAll(c patternSet, s string) string {
 	for _, re := range c {
 		s = stripBounded(re, s)
 	}
@@ -42,8 +42,8 @@ func StripAll(c Compiled, s string) string {
 // ponytail: exact equality — the Python threshold was a hardcoded 1.0, and
 // SequenceMatcher.ratio() >= 1.0 is true only for identical strings. If a
 // fuzzy threshold ever becomes configurable, swap in a real ratio here.
-func ValuesEqualAfterStripping(c Compiled, left, right any) bool {
-	return StripAll(c, scalarString(left)) == StripAll(c, scalarString(right))
+func valuesEqualAfterStripping(c patternSet, left, right any) bool {
+	return stripAll(c, scalarString(left)) == stripAll(c, scalarString(right))
 }
 
 // stripBounded deletes matches that are not glued to an adjacent alphanumeric,

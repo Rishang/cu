@@ -278,7 +278,7 @@ func assertPaths(t *testing.T, entries []Entry, want []string) {
 
 func TestSortByPathDoesNotMutateInput(t *testing.T) {
 	entries := []Entry{changed([]any{"z"}, nil, nil), changed([]any{"a"}, nil, nil)}
-	sorted := SortByPath(entries)
+	sorted := sortByPath(entries)
 
 	if entries[0].PathStr() != "z" {
 		t.Errorf("input was reordered: %v", keptPaths(entries))

@@ -325,11 +325,18 @@ func captureFromEditor(name, initial string) (string, error) {
 	editor := os.Getenv("EDITOR")
 	if editor == "" {
 		editor = "vim"
+		if _, err := exec.LookPath(editor); err != nil {
+			editor = "nano"
+		}
 	}
 	cmd := exec.Command(editor, path)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stderr, os.Stderr
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("editor %q failed: %w", editor, err)
+	runErr := cmd.Run()
+	// The editor can hand back control mid-line; put the cursor back at
+	// column 0 before anything else prints, regardless of why.
+	fmt.Fprint(os.Stderr, "\r")
+	if runErr != nil {
+		return "", fmt.Errorf("editor %q failed: %w", editor, runErr)
 	}
 
 	content, err := os.ReadFile(path)

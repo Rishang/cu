@@ -7,6 +7,7 @@ package pick
 
 import (
 	"fmt"
+	"os"
 
 	fzf "github.com/junegunn/fzf/src"
 )
@@ -102,6 +103,11 @@ func runFZF(labels []string, args []string) ([]string, error) {
 
 	code, err := fzf.Run(opts)
 	close(out)
+	// fzf redraws the tty itself and can hand back control mid-line, so the
+	// next thing we print lands wherever its cursor was left. A bare \r is
+	// cheap insurance regardless of why: it puts the cursor back at column 0
+	// before anything else writes to the terminal.
+	fmt.Fprint(os.Stderr, "\r")
 	if err != nil {
 		return nil, fmt.Errorf("fzf: %w", err)
 	}

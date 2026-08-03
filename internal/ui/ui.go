@@ -51,6 +51,7 @@ var (
 	Green      = Style{"32"}
 	Yellow     = Style{"33"}
 	Cyan       = Style{"36"}
+	Blue       = Style{"34"}
 	Bold       = Style{"1"}
 	Dim        = Style{"2"}
 	DimItalic  = Style{"2;3"}

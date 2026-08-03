@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/Rishang/cloudutil/internal/ui"
 )
@@ -189,13 +190,20 @@ func newPwpushSendCommand() *cobra.Command {
 			}
 
 			var payload string
-			if file != "" {
+			switch {
+			case file != "":
 				content, err := os.ReadFile(file)
 				if err != nil {
 					return err
 				}
 				payload = strings.TrimSpace(string(content))
-			} else {
+			case !term.IsTerminal(int(os.Stdin.Fd())):
+				content, err := io.ReadAll(os.Stdin)
+				if err != nil {
+					return err
+				}
+				payload = strings.TrimSpace(string(content))
+			default:
 				edited, err := captureFromEditor("payload.txt", "")
 				if err != nil {
 					return err
@@ -244,7 +252,8 @@ func newPwpushSendCommand() *cobra.Command {
 			if token == "" {
 				return fmt.Errorf("succeeded but no URL token was returned: %s", string(response))
 			}
-			fmt.Fprintln(ui.Out, cfg.Source+"/p/"+token)
+			fmt.Fprintln(ui.Out)
+			fmt.Fprintln(ui.Out, ui.Blue.Render(cfg.Source+"/p/"+token))
 			return nil
 		},
 	}
@@ -255,7 +264,8 @@ func newPwpushSendCommand() *cobra.Command {
 	flags.StringVarP(&note, "note", "n", "", "Optional note.")
 	// No --not-deletable: --deletable=false already says it.
 	flags.BoolVar(&deletable, "deletable", true, "Allow the viewer to delete the push.")
-	flags.StringVarP(&file, "file", "f", "", "File to upload instead of opening an editor.")
+	flags.StringVarP(&file, "file", "f", "",
+		"File to upload instead of opening an editor or reading piped stdin.")
 	flags.StringVarP(&kind, "kind", "k", "password", "Type: password, url, or qr.")
 	return cmd
 }

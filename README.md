@@ -81,11 +81,6 @@ ir get https://github.com/Rishang/cloudutil
 
 # With mise
 mise use -g "github:Rishang/cloudutil[exe=cu]"
-
-# With Go — note this installs a binary named `cloudutil` (the module path),
-# so rename it if you want the short `cu`:
-go install github.com/Rishang/cloudutil@latest
-mv "$(go env GOPATH)/bin/cloudutil" "$(go env GOPATH)/bin/cu"
 ```
 
 The install script defaults to the latest release, and takes `VERSION` and

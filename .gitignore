@@ -139,7 +139,6 @@ celerybeat.pid
 .env
 .envrc
 .venv
-ansible/collections/
 env/
 venv/
 ENV/
@@ -211,3 +210,15 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 .pi-subagents/
+# Go
+#   The cu binary from `go build -o cu .`; dist/ (goreleaser output) is already
+#   ignored above. go.mod, go.sum and the vendored-free module graph are tracked.
+/cu
+cu.exe
+*.test
+*.out
+coverage.html
+
+#   Local-only workspace files, never committed
+go.work
+go.work.sum

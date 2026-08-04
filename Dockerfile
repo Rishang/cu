@@ -1,70 +1,48 @@
 # Build stage
-FROM python:3.13-slim as builder
+FROM golang:1.26-alpine AS builder
 
-# Install build dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
 
-# Install UV
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-ENV PATH="/root/.cargo/bin:${PATH}"
+# Cached separately so dependency downloads survive source-only changes.
+COPY go.mod go.sum ./
+RUN go mod download
 
-# Set working directory
-WORKDIR /app
-
-# Copy project files
 COPY . .
-
-# Build the package
-RUN uv build
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /out/cu .
 
 # Runtime stage
-FROM python:3.13-slim
+FROM debian:bookworm-slim
 
-# Install runtime dependencies
+# fzf is no longer installed: it is compiled into the binary. What remains are
+# only the tools cu shells out to.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    fzf \
+    ca-certificates \
+    curl \
+    git \
     groff \
     less \
-    curl \
-    unzip \
-    git \
     openssh-client \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
 
-# Install AWS CLI v2
-RUN curl "https://awscli.amazonaws.com/awscliv2.zip" -o "awscliv2.zip" && \
-    unzip awscliv2.zip && \
+# AWS CLI v2 and the Session Manager plugin, for `cu aws ec2-ssm`.
+RUN curl -fsSL "https://awscliv2.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
+    unzip -q awscliv2.zip && \
     ./aws/install && \
     rm -rf awscliv2.zip aws
 
-# Install Session Manager Plugin
-RUN curl "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb" -o "session-manager-plugin.deb" && \
-    apt-get update && dpkg -i session-manager-plugin.deb && \
-    rm -f session-manager-plugin.deb && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
+RUN curl -fsSL "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb" \
+    -o "session-manager-plugin.deb" && \
+    dpkg -i session-manager-plugin.deb && \
+    rm -f session-manager-plugin.deb
 
-# Install UV for runtime
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-ENV PATH="/root/.cargo/bin:${PATH}"
+COPY --from=builder /out/cu /usr/local/bin/cu
 
-# Set working directory
-WORKDIR /app
-
-# Copy built package from builder
-COPY --from=builder /app/dist /app/dist
-
-# Install the built package
-RUN pip install --no-cache-dir /app/dist/*.whl
-
-# Set environment variables for AWS
 ENV AWS_DEFAULT_REGION=us-east-1
 
-# Create a non-root user (optional but recommended)
 RUN useradd -m -s /bin/bash cloudutil
 USER cloudutil
+WORKDIR /home/cloudutil
 
-# Set entrypoint to the CLI command
 ENTRYPOINT ["cu"]
 CMD ["--help"]

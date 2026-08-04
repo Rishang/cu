@@ -1,0 +1,64 @@
+version: "3"
+
+vars:
+  # goreleaser also writes here, and `task release` cleans it first.
+  DIST: dist
+  BINARY: "{{.DIST}}/cu"
+  # Stamped into main.version/commit/date, same as the goreleaser build.
+  VERSION:
+    sh: git describe --tags --always --dirty 2>/dev/null || echo dev
+  COMMIT:
+    sh: git rev-parse --short HEAD 2>/dev/null || echo none
+  DATE:
+    sh: date -u +%Y-%m-%dT%H:%M:%SZ
+  LDFLAGS: >-
+    -s -w
+    -X main.version={{.VERSION}}
+    -X main.commit={{.COMMIT}}
+    -X main.date={{.DATE}}
+
+tasks:
+  default:
+    cmds:
+      - task --list
+    silent: true
+
+  build:
+    desc: Build the cu binary
+    cmds:
+      - go build -ldflags '{{.LDFLAGS}}' -o {{.BINARY}} .
+
+  install:
+    desc: Install cu into GOBIN
+    cmds:
+      - go install -ldflags '{{.LDFLAGS}}' .
+
+  test:
+    desc: Run the test suite with the race detector
+    cmds:
+      - go test -race ./...
+
+  fmt:
+    desc: Format every Go file in place
+    cmds:
+      # -l lists what it rewrote, so the output says what changed.
+      - gofmt -l -w .
+
+  lint:
+    desc: gofmt + go vet
+    deps: [fmt]
+    cmds:
+      - go vet ./...
+
+  tidy:
+    cmds:
+      - go mod tidy
+
+  clean:
+    cmds:
+      - rm -rf {{.DIST}}
+
+  release:
+    desc: Local goreleaser snapshot into {{.DIST}}
+    cmds:
+      - goreleaser release --snapshot --clean

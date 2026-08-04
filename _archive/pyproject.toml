@@ -1,0 +1,38 @@
+[project]
+name = "cloudutil"
+version = "0.1.0"
+description = "AWS utilities for generating console login URLs via STS GetFederationToken and SSM parameter management"
+readme = "README.md"
+requires-python = ">=3.12,<=3.15"
+dependencies = [
+    "boto3>=1.39.3",
+    "typer>=0.16.0",
+    "rich>=13.0.0",
+    "requests>=2.28.0",
+    "pydantic>=2.5.0",
+    "textual>=6.1.0",
+    "pyyaml>=6.0.0",
+    "azure-identity>=1.15.0",
+    "azure-keyvault-secrets>=4.8.0",
+    "python-hcl2>=4.3",
+    "jmespath>=1.0",
+]
+
+
+[build-system]
+requires = ["setuptools>=42"]
+build-backend = "setuptools.build_meta"
+
+[tool.uv]
+package = true
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["cloudutil*"]
+
+[project.scripts]
+cu = "cloudutil.cli:app"

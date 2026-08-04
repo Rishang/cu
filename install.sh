@@ -5,14 +5,14 @@
 #   curl -fsSL https://raw.githubusercontent.com/Rishang/cloudutil/main/install.sh | bash
 #
 # Env overrides:
-#   VERSION=v1.0.0   install a specific tag instead of the latest release
+#   VERSION=v1.0.0   install a specific tag (default: latest)
 #   INSTALL_DIR=...  install into this directory instead of the auto-detected one
 #
 set -euo pipefail
 
 REPO="Rishang/cloudutil"
 BINARY="cu"
-VERSION="${VERSION:-}"
+VERSION="${VERSION:-latest}"
 INSTALL_DIR="${INSTALL_DIR:-}"
 
 info() { printf '\033[0;34m==>\033[0m %s\n' "$*"; }
@@ -80,7 +80,7 @@ need tar
 
 read -r OS ARCH <<<"$(detect_platform)"
 
-if [ -z "$VERSION" ]; then
+if [ "$VERSION" = "latest" ]; then
   info "Resolving latest release..."
   VERSION="$(latest_version)"
   [ -n "$VERSION" ] || die "could not determine the latest release tag"

@@ -9,7 +9,7 @@ CLI `cu` is a wrapper for most common AWS and Azure cloud operations with intera
 [![Kubernetes](https://img.shields.io/badge/Kubernetes-Cloud-blue.svg)](https://kubernetes.io/)
 
 ```bash
-go install github.com/Rishang/cloudutil@latest
+curl -fsSL https://raw.githubusercontent.com/Rishang/cloudutil/main/install.sh | bash
 ```
 
 A single static binary — `fzf` is compiled in, so there is nothing else to install for interactive selection.
@@ -82,11 +82,14 @@ ir get https://github.com/Rishang/cloudutil
 # With mise
 mise use -g "github:Rishang/cloudutil[exe=cu]"
 
-# With Go
+# With Go — note this installs a binary named `cloudutil` (the module path),
+# so rename it if you want the short `cu`:
 go install github.com/Rishang/cloudutil@latest
+mv "$(go env GOPATH)/bin/cloudutil" "$(go env GOPATH)/bin/cu"
 ```
 
-The install script takes `VERSION` and `INSTALL_DIR` overrides:
+The install script defaults to the latest release, and takes `VERSION` and
+`INSTALL_DIR` overrides:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Rishang/cloudutil/main/install.sh \

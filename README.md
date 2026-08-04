@@ -69,11 +69,28 @@ A single static binary — `fzf` is compiled in, so there is nothing else to ins
 ## 📦 Installation
 
 ```bash
-# With Go
-go install github.com/Rishang/cloudutil@latest
+# Install script (Linux and macOS) — picks a user-level bin directory
+# already on your $PATH, and falls back to /usr/local/bin.
+curl -fsSL https://raw.githubusercontent.com/Rishang/cloudutil/main/install.sh | bash
 
 # With Homebrew
 brew install Rishang/tap/cu
+
+# With install-release
+ir get https://github.com/Rishang/cloudutil
+
+# With mise
+mise use -g "github:Rishang/cloudutil[exe=cu]"
+
+# With Go
+go install github.com/Rishang/cloudutil@latest
+```
+
+The install script takes `VERSION` and `INSTALL_DIR` overrides:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Rishang/cloudutil/main/install.sh \
+  | VERSION=v1.0.0 INSTALL_DIR="$HOME/.local/bin" bash
 ```
 
 Or grab a prebuilt binary for your platform from the

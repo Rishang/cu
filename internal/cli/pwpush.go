@@ -95,6 +95,11 @@ func newPwpushConfigCommand() *cobra.Command {
 			if err := os.WriteFile(pwpushConfigPath(), data, 0o600); err != nil {
 				return err
 			}
+			// WriteFile's mode applies only on creation; enforce it too when a
+			// pre-existing config file had broader permissions.
+			if err := os.Chmod(pwpushConfigPath(), 0o600); err != nil {
+				return err
+			}
 			ui.Printf("Saved auth config to %s", pwpushConfigPath())
 			return nil
 		},

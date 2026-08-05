@@ -39,7 +39,6 @@ archives:
           - zip
     files:
       - README.md
-      - LICENSE*
 
 checksum:
   name_template: checksums.txt
@@ -64,6 +63,9 @@ homebrew_casks:
       owner: Rishang
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    # No tap token (unset secret) means binaries still publish instead of the
+    # whole release failing on a 401 from the tap repo.
+    skip_upload: '{{ if eq .Env.HOMEBREW_TAP_TOKEN "" }}true{{ else }}false{{ end }}'
     homepage: https://github.com/Rishang/cloudutil
     description: Cloud and Kubernetes utilities with fuzzy selection and semantic config diffing
     # fzf is compiled in, so nothing is needed for interactive selection. The AWS

@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -127,6 +128,51 @@ func TestStreamLogsReportsFailure(t *testing.T) {
 	err := StreamLogs(Pod{Namespace: "prod", Name: "api-1"}, false, -1, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "prod/api-1") {
 		t.Errorf("got %v, want an error naming the pod", err)
+	}
+}
+
+func TestExecArgs(t *testing.T) {
+	pod := Pod{Namespace: "prod", Name: "api-1"}
+
+	tests := []struct {
+		name      string
+		container string
+		command   []string
+		tty       bool
+		want      []string
+	}{
+		{
+			name:    "interactive shell",
+			command: []string{"sh"},
+			tty:     true,
+			want:    []string{"exec", "-i", "-t", "-n", "prod", "api-1", "--", "sh"},
+		},
+		{
+			// Piped input must not get -t: kubectl would drop it with a warning
+			// and tty processing would mangle the stream.
+			name:    "piped input drops the tty",
+			command: []string{"cat"},
+			want:    []string{"exec", "-i", "-n", "prod", "api-1", "--", "cat"},
+		},
+		{
+			// The container's own flags have to land after --, not be eaten by
+			// kubectl.
+			name:      "container and command flags",
+			container: "envoy",
+			command:   []string{"ls", "-la"},
+			tty:       true,
+			want: []string{"exec", "-i", "-t", "-c", "envoy",
+				"-n", "prod", "api-1", "--", "ls", "-la"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := execArgs(pod, tt.container, tt.command, tt.tty)
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("execArgs() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

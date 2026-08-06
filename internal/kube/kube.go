@@ -18,6 +18,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"golang.org/x/term"
 )
 
 // KeyRef identifies a single data key inside a Secret or ConfigMap.
@@ -328,6 +330,30 @@ func StreamLogs(pod Pod, follow bool, tail int, w io.Writer) error {
 		return fmt.Errorf("kubectl logs %s/%s: %w", pod.Namespace, pod.Name, err)
 	}
 	return nil
+}
+
+// Exec runs a command in a pod with the process's standard streams attached.
+func Exec(pod Pod, container string, command []string) error {
+	// -t only when stdin really is a terminal; otherwise kubectl warns and
+	// drops it, and piped input would arrive mangled by tty processing.
+	args := execArgs(pod, container, command, term.IsTerminal(int(os.Stdin.Fd())))
+
+	cmd := kubectl(args...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	return cmd.Run()
+}
+
+// execArgs builds the kubectl exec argv.
+func execArgs(pod Pod, container string, command []string, tty bool) []string {
+	args := []string{"exec", "-i"}
+	if tty {
+		args = append(args, "-t")
+	}
+	if container != "" {
+		args = append(args, "-c", container)
+	}
+	args = append(args, "-n", pod.Namespace, pod.Name, "--")
+	return append(args, command...)
 }
 
 // UseContext switches the current kubeconfig context.

@@ -1,6 +1,9 @@
 package cli
 
 import (
+	"errors"
+	"os/exec"
+
 	"github.com/spf13/cobra"
 
 	"github.com/Rishang/cloudutil/internal/kube"
@@ -19,6 +22,7 @@ func newK8sCommand() *cobra.Command {
 		newK8sKeyCommand("configmaps", "Interactive fzf view for Kubernetes ConfigMaps",
 			"k8s configmap key", kube.ListConfigMapKeys, kube.ConfigMapValue),
 		newKubeLogsCommand(),
+		newKubeExecCommand(),
 		newKubeSwitchCommand("ctx", "Switch between Kubernetes contexts interactively",
 			"context", kube.ListContexts, kube.CurrentContext, kube.UseContext),
 		newKubeSwitchCommand("ns", "Switch the current context's namespace interactively",
@@ -60,39 +64,115 @@ container it came from.
   cu k logs -A -f > app.log       # search all namespaces, follow, redirect to a file`,
 		Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			// -A wins over -n inside kube.ListPods, so namespace needs no reset.
-			pods, err := kube.ListPods(allNamespaces, namespace)
-			if err != nil {
+			pod, err := pickPod(allNamespaces, namespace)
+			if err != nil || pod == nil {
 				return err
 			}
-			// Without -n the scope is whatever the context points at, which is
-			// easy to forget; say so rather than just "no pods found".
-			if len(pods) == 0 && !allNamespaces {
-				scope := "the current namespace"
-				if namespace != "" {
-					scope = "namespace " + ui.Cyan.Render(namespace)
-				}
-				ui.Warn("No pods in %s. Use -A to search every namespace.", scope)
-				return nil
-			}
-
-			selected, err := pickFrom(pods, kube.Pod.Display, "pod",
-				pick.Options{Prompt: "pod> ", Preview: logsPreview})
-			if err != nil || len(selected) == 0 {
-				return err
-			}
-
-			return kube.StreamLogs(selected[0], follow, tail, ui.Out)
+			return kube.StreamLogs(*pod, follow, tail, ui.Out)
 		},
 	}
 
 	flags := cmd.Flags()
-	flags.BoolVarP(&allNamespaces, "all-namespaces", "A", false, "Search across all namespaces.")
-	flags.StringVarP(&namespace, "namespace", "n", "",
-		"Namespace to search (ignored with --all-namespaces).")
+	addPodScopeFlags(cmd, &allNamespaces, &namespace)
 	flags.BoolVarP(&follow, "follow", "f", false, "Stream new log lines as they arrive.")
 	flags.IntVarP(&tail, "tail", "t", -1, "Show only this many recent lines per pod (-1 for all).")
 	return cmd
+}
+
+func newKubeExecCommand() *cobra.Command {
+	var (
+		allNamespaces bool
+		namespace     string
+		container     string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "exec [flags] [-- command...]",
+		Short: "Fuzzy-pick a pod and exec into it",
+		Long: `Pick a pod with fzf and run a command in it, defaulting to an interactive sh.
+
+The side panel shows the last 50 lines of whichever pod is highlighted, the same
+as cu k logs, so you can land in the one actually misbehaving. A pod with more
+than one container asks which, unless -c already named it.
+
+  cu k exec                              # sh in a pod in the current namespace
+  cu k exec -n prod -- bash              # a different shell
+  cu k exec -A -- cat /etc/hosts         # search every namespace, run one command
+
+cu exits with the command's own status, so this works in a script.`,
+		Args: cobra.ArbitraryArgs,
+		RunE: func(_ *cobra.Command, args []string) error {
+			pod, err := pickPod(allNamespaces, namespace)
+			if err != nil || pod == nil {
+				return err
+			}
+
+			// Naming a container is only unavoidable when there are several;
+			// kubectl picks for you otherwise, and so should this.
+			if container == "" && len(pod.Containers) > 1 {
+				chosen, err := pickStrings(pod.Containers, "container",
+					pick.Options{Prompt: "container> "})
+				if err != nil || len(chosen) == 0 {
+					return err
+				}
+				container = chosen[0]
+			}
+
+			// sh over bash: it exists in an alpine or distroless-ish image where
+			// bash does not, and -- lets anyone who wants bash say so.
+			command := args
+			if len(command) == 0 {
+				command = []string{"sh"}
+			}
+
+			err = kube.Exec(*pod, container, command)
+			var exitErr *exec.ExitError
+			if errors.As(err, &exitErr) {
+				// The container's exit status is the interesting one, and
+				// kubectl has already printed whatever went wrong.
+				return exitWith(exitErr.ExitCode())
+			}
+			return err
+		},
+	}
+
+	addPodScopeFlags(cmd, &allNamespaces, &namespace)
+	cmd.Flags().StringVarP(&container, "container", "c", "",
+		"Container to exec into (prompts when the pod has several).")
+	return cmd
+}
+
+func addPodScopeFlags(cmd *cobra.Command, allNamespaces *bool, namespace *string) {
+	cmd.Flags().BoolVarP(allNamespaces, "all-namespaces", "A", false,
+		"Search across all namespaces.")
+	cmd.Flags().StringVarP(namespace, "namespace", "n", "",
+		"Namespace to search (ignored with --all-namespaces).")
+}
+
+// pickPod lists pods and selects one with the shared log preview.
+func pickPod(allNamespaces bool, namespace string) (*kube.Pod, error) {
+	// -A wins over -n inside kube.ListPods, so namespace needs no reset.
+	pods, err := kube.ListPods(allNamespaces, namespace)
+	if err != nil {
+		return nil, err
+	}
+	// Without -n the scope is whatever the context points at, which is easy to
+	// forget; say so rather than just "no pods found".
+	if len(pods) == 0 && !allNamespaces {
+		scope := "the current namespace"
+		if namespace != "" {
+			scope = "namespace " + ui.Cyan.Render(namespace)
+		}
+		ui.Warn("No pods in %s. Use -A to search every namespace.", scope)
+		return nil, nil
+	}
+
+	selected, err := pickFrom(pods, kube.Pod.Display, "pod",
+		pick.Options{Prompt: "pod> ", Preview: logsPreview})
+	if err != nil || len(selected) == 0 {
+		return nil, err
+	}
+	return &selected[0], nil
 }
 
 // newK8sKeyCommand builds the shared list → fzf → print flow used by both

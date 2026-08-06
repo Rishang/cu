@@ -96,7 +96,7 @@ Then restart your shell. `cu completion --help` prints the same list.
 | `cu aws` | AWS: console login, SSM, Secrets Manager, decode message |
 | `cu az` | Azure Key Vault secrets |
 | `cu os` | Shell history search |
-| `cu k` | Kubernetes secrets, ConfigMaps, pod logs, context and namespace switch |
+| `cu k` | Kubernetes secrets, ConfigMaps, pod logs, pod exec, context and namespace switch |
 | `cu diff` | Semantic diff of JSON, YAML, TOML, and HCL config files |
 | `cu vault` | HashiCorp Vault and Infisical secrets |
 | `cu json2yaml`, `cu yaml2json` | Format conversion on stdin or a file |
@@ -546,6 +546,35 @@ it came from:
 [pod/api-7d9f-abc/envoy]  [info] listener manager: all dependencies initialized
 ```
 
+#### Pod Exec
+
+Fuzzy-pick a pod and run something in it. Same picker and same preview panel as
+`cu k logs`, so you can land in the pod that is actually misbehaving.
+
+```bash
+# Interactive shell in a pod in the current namespace
+cu k exec
+
+# A different shell, in a named namespace
+cu k exec -n prod -- bash
+
+# One command, non-interactively — exits with the command's own status
+cu k exec -A -- cat /etc/hosts
+```
+
+| Flag | Meaning |
+|------|---------|
+| `-n`, `--namespace` | Namespace to search (default: the current context's) |
+| `-A`, `--all-namespaces` | Search every namespace |
+| `-c`, `--container` | Container to exec into; prompted for when the pod has several |
+
+The default command is `sh`, not `bash` — it exists in alpine and other minimal
+images where `bash` does not. Anything after `--` replaces it, keeping its own
+flags.
+
+The TTY is requested only when your stdin is one, so `echo data | cu k exec -- tee
+/tmp/x` pipes cleanly instead of being mangled by terminal processing.
+
 #### Kubernetes Context and Namespace Switching
 
 `ctx` is a `kubectx` equivalent and `ns` a `kubens` one.
@@ -596,6 +625,7 @@ What that means per command, with a namespace-scoped Role:
 | Command | In-pod behaviour |
 |---|---|
 | `cu k secrets` / `configmaps` / `logs` | Work within the Role's namespace. Use `-n <ns>`; `-A` issues a cluster-wide list and fails with Forbidden |
+| `cu k exec` | Also needs `create` on `pods/exec`, which `get`/`list` on pods does not imply |
 | `cu k ns` | Needs cluster-wide `list namespaces` — fails unless the Role grants it |
 | `cu k ctx` | Lists the single `in-cluster` context |
 
@@ -833,7 +863,7 @@ and `$FZF_DEFAULT_OPTS` / `$FZF_DEFAULT_OPTS_FILE` are honored as usual.
 | `cu aws` | `login`, `ssm-parameters`, `ec2-ssm`, `secrets`, `decode-message` |
 | `cu az` | `secrets` |
 | `cu os` | `history` |
-| `cu k` | `secrets`, `configmaps`, `logs`, `ctx`, `ns` |
+| `cu k` | `secrets`, `configmaps`, `logs`, `exec`, `ctx`, `ns` |
 | `cu diff` | `-f <a> -f <b>`, `--config <config.yaml>` |
 | `cu vault` | `secrets` |
 | *(top level)* | `json2yaml`, `yaml2json`, `completion` |

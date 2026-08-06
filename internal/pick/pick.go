@@ -24,7 +24,10 @@ type Options struct {
 
 // fzfArgs turns Options into fzf's own flags.
 func fzfArgs(opts Options) []string {
-	args := []string{"--exact"}
+	// --ansi so a label can highlight itself, e.g. the active kube context.
+	// fzf strips the codes from what it returns, which is why Select indexes
+	// items by their stripped label.
+	args := []string{"--exact", "--ansi"}
 	if opts.Multi {
 		args = append(args, "--multi")
 	}
@@ -62,8 +65,11 @@ func Select[T any](items []T, label func(T) string, opts Options) ([]T, error) {
 	index := make(map[string]int, len(items))
 	for i, item := range items {
 		labels[i] = label(item)
-		if _, seen := index[labels[i]]; !seen {
-			index[labels[i]] = i
+		// Keyed on the visible text: fzf hands back the line with any styling
+		// already removed.
+		plain := ui.StripANSI(labels[i])
+		if _, seen := index[plain]; !seen {
+			index[plain] = i
 		}
 	}
 
@@ -74,7 +80,7 @@ func Select[T any](items []T, label func(T) string, opts Options) ([]T, error) {
 
 	var selected []T
 	for _, line := range lines {
-		if i, ok := index[line]; ok {
+		if i, ok := index[ui.StripANSI(line)]; ok {
 			selected = append(selected, items[i])
 		}
 	}

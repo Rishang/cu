@@ -136,3 +136,62 @@ func TestPodDisplay(t *testing.T) {
 		t.Errorf("Display() = %q, want %q", got, want)
 	}
 }
+
+// TestCurrentContextAndNamespace runs the real kubectl against a throwaway
+// kubeconfig: `kubectl config` needs no cluster, so this checks the actual
+// jsonpath and output handling rather than a stub's idea of them.
+func TestCurrentContextAndNamespace(t *testing.T) {
+	if _, err := exec.LookPath("kubectl"); err != nil {
+		t.Skip("kubectl not available")
+	}
+
+	config := filepath.Join(t.TempDir(), "config")
+	if err := os.WriteFile(config, []byte(`apiVersion: v1
+kind: Config
+current-context: prod
+clusters:
+- name: c1
+  cluster: {server: https://one.invalid}
+contexts:
+- name: prod
+  context: {cluster: c1, user: u1, namespace: payments}
+- name: staging
+  context: {cluster: c1, user: u1}
+users:
+- name: u1
+  user: {}
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KUBECONFIG", config)
+
+	if got := CurrentContext(); got != "prod" {
+		t.Errorf("CurrentContext() = %q, want prod", got)
+	}
+	if got := CurrentNamespace(); got != "payments" {
+		t.Errorf("CurrentNamespace() = %q, want payments", got)
+	}
+
+	contexts, err := ListContexts()
+	if err != nil {
+		t.Fatalf("ListContexts: %v", err)
+	}
+	if len(contexts) != 2 || contexts[0] != "prod" || contexts[1] != "staging" {
+		t.Fatalf("ListContexts() = %v, want [prod staging]", contexts)
+	}
+
+	// A context with no namespace falls back to what kubectl would use.
+	if err := UseContext("staging"); err != nil {
+		t.Fatalf("UseContext: %v", err)
+	}
+	if got := CurrentNamespace(); got != "default" {
+		t.Errorf("CurrentNamespace() with none set = %q, want default", got)
+	}
+
+	// No current-context at all is empty, not an error: the caller only marks
+	// a list with it.
+	t.Setenv("KUBECONFIG", filepath.Join(t.TempDir(), "missing"))
+	if got := CurrentContext(); got != "" {
+		t.Errorf("CurrentContext() with no kubeconfig = %q, want empty", got)
+	}
+}

@@ -6,6 +6,7 @@
 package kube
 
 import (
+	"cmp"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -31,10 +32,18 @@ func (k KeyRef) Display() string {
 	return fmt.Sprintf("%s/%s/%s", k.Namespace, k.Name, k.Key)
 }
 
+// kubectl builds a kubectl command carrying the environment it should run with,
+// which is the ambient one everywhere except inside a pod with no kubeconfig.
+func kubectl(args ...string) *exec.Cmd {
+	cmd := exec.Command("kubectl", args...)
+	cmd.Env = kubectlEnv()
+	return cmd
+}
+
 // run executes kubectl and returns its stdout, turning a failure into an error
 // carrying kubectl's own message.
 func run(args ...string) ([]byte, error) {
-	out, err := exec.Command("kubectl", args...).Output()
+	out, err := kubectl(args...).Output()
 	if err == nil {
 		return out, nil
 	}
@@ -101,6 +110,27 @@ func runLines(args ...string) ([]string, error) {
 // ListContexts returns context names from the current kubeconfig.
 func ListContexts() ([]string, error) {
 	return runLines("config", "get-contexts", "-o", "name")
+}
+
+// configValue runs a read-only kubectl config query. A failure — no kubeconfig,
+// nothing selected — reads as "unset" rather than an error: callers only use
+// these to mark the active entry in a list.
+func configValue(args ...string) string {
+	out, err := run(args...)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// CurrentContext returns the context kubectl would act on.
+func CurrentContext() string { return configValue("config", "current-context") }
+
+// CurrentNamespace returns the current context's default namespace, which is
+// what a bare kubectl get would search. An unset one falls back to default,
+// just as kubectl does.
+func CurrentNamespace() string {
+	return cmp.Or(configValue("config", "view", "--minify", "-o", "jsonpath={..namespace}"), "default")
 }
 
 // ListNamespaces returns every namespace name. The API returns them sorted and
@@ -291,7 +321,7 @@ func StreamLogs(pod Pod, follow bool, tail int, w io.Writer) error {
 		args = append(args, "--prefix")
 	}
 
-	cmd := exec.Command("kubectl", args...)
+	cmd := kubectl(args...)
 	cmd.Stdout = w
 	cmd.Stderr = os.Stderr // kubectl explains its own failures
 	if err := cmd.Run(); err != nil {

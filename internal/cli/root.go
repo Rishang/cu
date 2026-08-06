@@ -101,6 +101,8 @@ func NewRootCommand() *cobra.Command {
 		newVaultCommand(),
 		newDiffCommand(),
 		newTaskCommand(),
+		newJSON2YAMLCommand(),
+		newYAML2JSONCommand(),
 	)
 	// Ours replaces the generated one; see newCompletionCommand.
 	root.CompletionOptions.DisableDefaultCmd = true

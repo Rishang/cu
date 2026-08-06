@@ -89,6 +89,9 @@ var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 // alignment. Not to be confused with width(), the terminal's width.
 func TextWidth(s string) int { return visibleWidth(s) }
 
+// StripANSI removes styling from s, leaving the text a terminal would show.
+func StripANSI(s string) string { return ansiPattern.ReplaceAllString(s, "") }
+
 // visibleWidth returns the rendered column width of s, ignoring escape codes.
 func visibleWidth(s string) int {
 	return runewidth.StringWidth(ansiPattern.ReplaceAllString(s, ""))
@@ -144,7 +147,14 @@ func PrintJSON(v any) error {
 	if err := enc.Encode(v); err != nil {
 		return err
 	}
-	data := bytes.TrimRight(buf.Bytes(), "\n")
+	return PrintJSONBytes(buf.Bytes())
+}
+
+// PrintJSONBytes is PrintJSON for JSON that is already encoded. Callers that
+// care about key order need this one: routing through PrintJSON would decode
+// into a map first, and Go sorts map keys on the way back out.
+func PrintJSONBytes(data []byte) error {
+	data = bytes.TrimRight(data, "\n")
 
 	if !outIsTerminal() {
 		_, err := fmt.Fprintf(Out, "%s\n", data)

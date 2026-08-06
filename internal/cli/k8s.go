@@ -20,9 +20,9 @@ func newK8sCommand() *cobra.Command {
 			"k8s configmap key", kube.ListConfigMapKeys, kube.ConfigMapValue),
 		newKubeLogsCommand(),
 		newKubeSwitchCommand("ctx", "Switch between Kubernetes contexts interactively",
-			"context", kube.ListContexts, kube.UseContext),
+			"context", kube.ListContexts, kube.CurrentContext, kube.UseContext),
 		newKubeSwitchCommand("ns", "Switch the current context's namespace interactively",
-			"namespace", kube.ListNamespaces, kube.UseNamespace),
+			"namespace", kube.ListNamespaces, kube.CurrentNamespace, kube.UseNamespace),
 	)
 	return cmd
 }
@@ -158,6 +158,7 @@ func newK8sKeyCommand(
 func newKubeSwitchCommand(
 	use, short, noun string,
 	list func() ([]string, error),
+	active func() string,
 	switchTo func(string) error,
 ) *cobra.Command {
 	return &cobra.Command{
@@ -172,11 +173,31 @@ func newKubeSwitchCommand(
 			if err != nil {
 				return err
 			}
-			selected, err := pickStrings(names, noun, pick.Options{Prompt: noun + "> "})
+
+			// Marking the active entry answers "which am I on?" without a
+			// second command. Styling only touches the label, so what gets
+			// switched to is still the plain name.
+			current := active()
+			selected, err := pickFrom(names, func(name string) string {
+				return markCurrent(name, current)
+			}, noun, pick.Options{Prompt: noun + "> "})
 			if err != nil || len(selected) == 0 {
 				return err
 			}
 			return switchTo(selected[0])
 		},
 	}
+}
+
+// markCurrent highlights name in green when it is the active one, falling back
+// to a suffix when colour is off — under NO_COLOR that marker is the only thing
+// left to tell them apart.
+func markCurrent(name, current string) string {
+	if name != current {
+		return name
+	}
+	if !ui.ColorEnabled() {
+		return name + " (current)"
+	}
+	return ui.Green.Render(name)
 }

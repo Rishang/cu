@@ -34,6 +34,7 @@ Password Pusher, and a Taskfile passthrough.
 | `internal/kube/` | kubectl invocation and parsing |
 | `internal/awsx/` | AWS SDK helpers |
 | `internal/diff/` | Semantic diff engine and its config |
+| `tests/assets/` | Fixtures shared by the Go tests |
 
 ## Build, test, lint
 
@@ -41,14 +42,10 @@ Use the Taskfile — it stamps version metadata the same way the release build
 does, so don't hand-roll `go build`:
 
 ```bash
-task              # list every task
 task build        # -> dist/cu, with version/commit/date ldflags
-task install      # into GOBIN
 task test         # go test -race ./...
-task fmt          # gofmt -l -w .
-task lint         # fmt, then go vet ./...
-task tidy         # go mod tidy
-task release      # local goreleaser snapshot
+task lint         # gofmt -l -w ., then go vet ./...
+task              # lists the rest (install, tidy, release)
 ```
 
 `task lint` and `task test` must both pass before you call work done. Report
@@ -58,7 +55,6 @@ failures with their output rather than describing them.
 
 ### Comments explain why, never what
 
-This is the most visible convention in the codebase and the easiest to break.
 A comment earns its place by recording a decision, a constraint, or a trap — not
 by restating the code beneath it.
 
@@ -66,11 +62,6 @@ by restating the code beneath it.
 // Buffered to len(labels): fzf can never emit more lines than it was given,
 // so it cannot block on Output while we wait for Run to return.
 out := make(chan string, len(labels))
-```
-
-```go
-// Recursion with a bounded errgroup would be shorter, but a parent blocked in
-// Go() while holding a slot can deadlock against its own children.
 ```
 
 Bad: `// loop over the secrets`. Delete it. If a block needs a what-comment, the
@@ -140,17 +131,16 @@ credential is written `0600` with an explicit `os.Chmod` afterwards, since
 
 ### Tests
 
-- Standard `testing` only. No frameworks, no fixtures beyond `t.TempDir()`,
-  no mocking libraries.
-- Table-driven where there are cases; `t.Run` subtests named for the behaviour.
+- Standard `testing` only. No frameworks, no mocking libraries, no fixtures
+  beyond `t.TempDir()`.
+- One runnable check per piece of non-trivial logic (a branch, a parser, a
+  credential path), testing the contract rather than the implementation; trivial
+  one-liners need none. Table-driven where there are cases, `t.Run` subtests
+  named for the behaviour it asserts.
 - **Prefer the real thing over a stub.** `kubectl config` needs no cluster, so
   test against real `kubectl` behind an `exec.LookPath` skip. Use `httptest`
   for HTTP APIs and assert on the request the client actually made.
-- Test names and failure messages state the behaviour and why it matters:
-  `t.Errorf("stripped styling = %q, want prod-eu — fzf would not map it back")`.
-- Test the contract, not the implementation. One runnable check per piece of
-  non-trivial logic (a branch, a parser, a money or credential path); trivial
-  one-liners need none.
+- A failure message says what broke and why it matters, not just `got != want`.
 - `-race` is not optional; guard shared state in fake HTTP handlers, which run
   on several goroutines when the client fans out.
 - Restore global state with `t.Cleanup`, and `t.Setenv` rather than `os.Setenv`.
@@ -159,6 +149,6 @@ credential is written `0600` with an explicit `os.Chmod` afterwards, since
 
 ### Documentation
 
-A user-visible change updates `README.md` in the same commit: the feature list,
-the table of contents, the relevant section, and the command reference table.
-Explain the trap, not just the flag.
+A user-visible change updates `README.md` in the same commit: the relevant
+section, its table-of-contents entry, and the two command tables. Explain the
+trap, not just the flag.

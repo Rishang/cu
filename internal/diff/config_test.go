@@ -1,8 +1,6 @@
 package diff
 
 import (
-	"os"
-	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -185,10 +183,7 @@ func keySet[V any](m map[string]V) map[string]bool {
 
 // A mistyped key used to parse fine and suppress nothing.
 func TestLoadConfigRejectsUnknownKeys(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "cu_diff.yml")
-	if err := os.WriteFile(path, []byte("globl_ignore_keys: [image]\ndiffs:\n  - files: [a.yaml, b.yaml]\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	path := write(t, "cu_diff.yml", "globl_ignore_keys: [image]\ndiffs:\n  - files: [a.yaml, b.yaml]\n")
 	_, err := LoadConfig(path)
 	if err == nil || !strings.Contains(err.Error(), "globl_ignore_keys") {
 		t.Fatalf("expected an unknown-field error naming the typo, got %v", err)

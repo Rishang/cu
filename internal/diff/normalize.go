@@ -59,8 +59,6 @@ func normalize(v any) any {
 		return t
 	case int:
 		return int64(t)
-	case int64:
-		return t
 	case uint64:
 		// YAML hands back positive integers as uint64, which can overflow int64.
 		if t <= math.MaxInt64 {

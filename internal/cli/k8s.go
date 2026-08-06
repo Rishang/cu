@@ -60,10 +60,7 @@ container it came from.
   cu k logs -A -f > app.log       # search all namespaces, follow, redirect to a file`,
 		Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			if allNamespaces {
-				namespace = ""
-			}
-
+			// -A wins over -n inside kube.ListPods, so namespace needs no reset.
 			pods, err := kube.ListPods(allNamespaces, namespace)
 			if err != nil {
 				return err
@@ -116,6 +113,8 @@ func newK8sKeyCommand(
 		Short: short,
 		Args:  cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
+			// Unlike logs, the reset is load-bearing: it lets --select-namespace
+			// still prompt when -A was passed alongside -n.
 			if allNamespaces {
 				namespace = ""
 			}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -126,27 +127,14 @@ func runInlineDiff(f *diffFlags, cliFormat diff.Format) error {
 		cliFormat = diff.DefaultFormat
 	}
 
-	pairs := indexPairs(len(f.files))
-	total := 0
-	for i, pair := range pairs {
-		label := "DIFF"
-		if len(pairs) > 1 {
-			label = fmt.Sprintf("PAIR %d/%d", i+1, len(pairs))
-		}
-		fileA, fileB := f.files[pair[0]], f.files[pair[1]]
-		printPairHeader(label, fileA, fileB, fileA, fileB)
-
-		count, err := executeDiff(fileA, fileB, diff.FilterRules{
-			LocalIgnoreKeys:     f.ignoreKeys,
-			LocalIgnorePatterns: f.ignorePatterns,
-		}, cliFormat, f.query)
-		if err != nil {
-			return err
-		}
-		total += count
-		ui.Print("")
+	total, pairs, err := diffPairs(f.files, f.files, "", diff.FilterRules{
+		LocalIgnoreKeys:     f.ignoreKeys,
+		LocalIgnorePatterns: f.ignorePatterns,
+	}, cliFormat, f.query)
+	if err != nil {
+		return err
 	}
-	return finish(total, len(pairs))
+	return finish(total, pairs)
 }
 
 func runConfigDiff(f *diffFlags, cliFormat diff.Format) error {
@@ -166,7 +154,7 @@ func runConfigDiff(f *diffFlags, cliFormat diff.Format) error {
 		return err
 	}
 
-	total := 0
+	total, pairs := 0, 0
 	for i, entry := range cfg.Diffs {
 		// Query precedence: CLI -q, then the per-pair query, then the global one.
 		query := f.query
@@ -187,35 +175,53 @@ func runConfigDiff(f *diffFlags, cliFormat diff.Format) error {
 			resolved[j] = filepath.Join(configDir, file)
 		}
 
-		pairs := indexPairs(len(resolved))
-		for j, pair := range pairs {
-			label := fmt.Sprintf("DIFF %d/%d", i+1, len(cfg.Diffs))
-			if len(pairs) > 1 {
-				label += fmt.Sprintf(" PAIR %d/%d", j+1, len(pairs))
-			}
-			fileA, fileB := resolved[pair[0]], resolved[pair[1]]
-			printPairHeader(label, fileA, fileB, entry.Files[pair[0]], entry.Files[pair[1]])
-
-			count, err := executeDiff(fileA, fileB, diff.FilterRules{
+		count, n, err := diffPairs(resolved, entry.Files,
+			fmt.Sprintf("DIFF %d/%d", i+1, len(cfg.Diffs)), diff.FilterRules{
 				GlobalIgnoreKeys:     cfg.GlobalIgnoreKeys,
 				LocalIgnoreKeys:      entry.IgnoreKeys,
 				GlobalIgnorePatterns: cfg.GlobalIgnorePatterns,
 				LocalIgnorePatterns:  entry.IgnorePatterns,
 			}, format, query)
-			if err != nil {
-				return err
-			}
-			total += count
-			ui.Print("")
+		if err != nil {
+			return err
 		}
+		total += count
+		pairs += n
 	}
-	return finish(total, len(cfg.Diffs))
+	return finish(total, pairs)
 }
 
-// finish prints the cross-group summary and exits 1 when anything differed.
-func finish(total, groups int) error {
-	if groups > 1 {
-		printOverallSummary(total, groups)
+// diffPairs renders every 2-combination of the given files. paths are what gets
+// loaded, display what the header shows (config mode keeps the paths as written).
+// prefix labels the group and is empty in inline mode. It returns the number of
+// differences found and the number of pairs compared.
+func diffPairs(paths, display []string, prefix string, rules diff.FilterRules, format diff.Format, query string) (total, pairs int, err error) {
+	combos := indexPairs(len(paths))
+	for i, pair := range combos {
+		label := prefix
+		if label == "" {
+			label = "DIFF"
+		}
+		if len(combos) > 1 {
+			label = strings.TrimSpace(fmt.Sprintf("%s PAIR %d/%d", prefix, i+1, len(combos)))
+		}
+		fileA, fileB := paths[pair[0]], paths[pair[1]]
+		printPairHeader(label, fileA, fileB, display[pair[0]], display[pair[1]])
+
+		count, err := executeDiff(fileA, fileB, rules, format, query)
+		if err != nil {
+			return 0, 0, err
+		}
+		total += count
+		ui.Print("")
+	}
+	return total, len(combos), nil
+}
+
+// finish prints the cross-pair summary and exits 1 when anything differed.
+func finish(total, pairs int) error {
+	if pairs > 1 {
+		printOverallSummary(total, pairs)
 	}
 	if total > 0 {
 		return exitWith(1)
@@ -275,12 +281,12 @@ func printPairHeader(label, fileA, fileB, displayA, displayB string) {
 	ui.Print("")
 }
 
-func printOverallSummary(total, groups int) {
+func printOverallSummary(total, pairs int) {
 	if total == 0 {
 		ui.Rule(ui.BoldGreen.Render("✅  ALL DIFFS PASSED — no differences detected."), ui.Green)
 		return
 	}
-	ui.Rule(ui.BoldRed.Sprintf("❌  %d difference(s) across %d pair(s).", total, groups), ui.Red)
+	ui.Rule(ui.BoldRed.Sprintf("❌  %d difference(s) across %d pair(s).", total, pairs), ui.Red)
 }
 
 // indexPairs returns every 2-combination of indices, in order.

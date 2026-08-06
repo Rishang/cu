@@ -83,12 +83,9 @@ func newAWSLoginCommand() *cobra.Command {
 				return err
 			}
 
-			// Explicit --region wins; otherwise use whatever the profile or
-			// environment resolved to, falling back to us-east-1.
-			region := creds.region
-			if region == "" {
-				region = cfg.Region
-			}
+			// LoadConfig already applied --region, so cfg.Region is the
+			// resolved one; fall back only when nothing resolved at all.
+			region := cfg.Region
 			if region == "" {
 				region = "us-east-1"
 			}

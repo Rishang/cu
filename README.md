@@ -35,6 +35,9 @@ A single static binary — `fzf` is compiled in, so there is nothing else to ins
         - [Environment Variables](#environment-variables)
     - [Azure Operations (`az`)](#azure-operations-az)
       - [Key Vault Secrets](#key-vault-secrets)
+    - [Secret Providers (`vault`)](#secret-providers-vault)
+      - [Scoping with `--path`](#scoping-with---path)
+      - [What gets listed](#what-gets-listed)
     - [Kubernetes Operations](#kubernetes-operations)
       - [Kubernetes Secrets](#kubernetes-secrets)
       - [Kubernetes ConfigMaps](#kubernetes-configmaps)
@@ -61,6 +64,7 @@ A single static binary — `fzf` is compiled in, so there is nothing else to ins
 - 🎨 **Beautiful Output** - Colored tables and diffs, with status on stderr so stdout stays pipeable
 - ⚡ **Profile & Region Support** - Seamless switching between AWS profiles and regions (where supported per command)
 - 🎛️ **Kubernetes Operations** - Interactive secrets and ConfigMaps browsing, pod log streaming with a live preview panel, and context/namespace switching via `kubectl`
+- 🗝️ **Secret Providers** - Browse HashiCorp Vault KV v2 and Infisical from one command, with profiles in `~/.config/cu/secret_providers.yml`
 - 🧰 **OS Utils** - Shell history search
 - 🔍 **Semantic Diff** - Structural diff of JSON, YAML, TOML, and HCL/Terraform config files. Table or unified output, N-way comparison, smart env-pattern ignore, JMESPath filtering, and auto-detection of `cu_diff.yml`
 - 🗂️ **Taskfile Passthrough** - Run local Taskfile tasks via `cu task ...` with interactive terminal support
@@ -143,6 +147,7 @@ The main entrypoint is `cu`. Subcommands are wired in `internal/cli/root.go`:
 | `cu os` | `internal/cli/os.go` | Shell history search |
 | `cu k` | `internal/cli/k8s.go` | Kubernetes secrets, ConfigMaps, pod logs, context and namespace switch |
 | `cu diff` | `internal/cli/diff.go` | Semantic diff of JSON, YAML, TOML, and HCL config files |
+| `cu vault` | `internal/cli/secrets.go` | HashiCorp Vault and Infisical secrets |
 | `cu pwpush` | `internal/cli/pwpush.go` | Password Pusher |
 | `cu task` | `internal/cli/task.go` | Passthrough to the `task` binary |
 
@@ -350,6 +355,120 @@ Value: super-secret-value
 
 `Description` carries the secret's Key Vault content type. As with AWS, a value
 that parses as a JSON object is printed as nested JSON instead of a raw string.
+
+### Secret Providers (`vault`)
+
+Unlike AWS and Azure, HashiCorp Vault and Infisical have no ambient credential
+chain, so connections come from `~/.config/cu/secret_providers.yml`. It is a list
+of profiles, each naming its `provider`, so one command browses both backends:
+
+```yaml
+- profile: prod
+  provider: vault
+  endpoint: https://vault.example.com
+  credentials:
+    # Either a token, or a username and password for the userpass auth method.
+    token: hvs.CAESxxxx
+    username: ""
+    password: ""
+    namespace: default        # Vault Enterprise namespace; omit on OSS
+
+- profile: inf-prod
+  provider: infisical
+  endpoint: https://us.infisical.com   # or eu.infisical.com, or self-hosted
+  credentials:
+    # Either a machine identity access token (Token Auth), used as-is...
+    token: st.xxxxx
+    # ...or a Universal Auth pair, exchanged for a short-lived token at startup.
+    client_id: 8f1a...
+    client_secret: 4c2b...
+    namespace: my-org         # organizationSlug; only for sub-organizations
+```
+
+Keep it owner-readable only: `chmod 600 ~/.config/cu/secret_providers.yml`.
+
+Infisical's public API authenticates **machine identities only** — email and
+password are for the web dashboard and its own CLI, which use an SRP exchange
+plus MFA. Create an identity, add it to the projects it should reach, and use
+either of the two credential shapes above.
+
+```bash
+# Pick the profile interactively when the file has more than one
+cu vault secrets
+
+# -p is persistent, so it works before or after the subcommand
+cu vault -p prod secrets
+cu vault secrets --profile inf-prod
+export VAULT_PROFILE=prod    # default for -p
+```
+
+#### Scoping with `--path`
+
+`--path` is a prefix of the lines you see in fzf, so it narrows by whatever the
+provider's outermost container is. Every segment is resolved by the server, not
+filtered afterwards, so a narrow path also means fewer API calls:
+
+| `--path` | Vault | Infisical |
+|---|---|---|
+| *(omitted)* | every KV v2 mount | every project × environment |
+| `a` | mount `a` | project `a`, all environments |
+| `a/b` | path `b` in mount `a` | project `a`, environment `b` |
+| `a/b/c` | path `b/c` in mount `a` | folder `/c` in project `a`, environment `b` |
+
+An Infisical project matches on its slug, name, or id. A Vault mount whose own
+path contains a slash can only be addressed by its first segment — use `--filter`
+for the rest.
+
+`--filter` keeps only paths containing a substring, applied after listing.
+
+#### What gets listed
+
+Both providers list everything the credentials can see and skip what they cannot:
+a Vault subtree your policy denies, or an Infisical project your identity was
+never added to, is passed over rather than failing the run.
+
+- **Vault** discovers mounts via `sys/internal/ui/mounts` — the endpoint the Vault
+  UI itself uses, readable by any authenticated token, unlike `sys/mounts` which
+  needs a root-ish policy. KV **v1** mounts are named once in a warning and
+  skipped. The tree is walked breadth-first, one bounded batch of LIST calls per
+  level, so a wide mount does not serialise.
+- **Infisical** discovers projects and their environments via `/api/v1/projects`,
+  then makes one `recursive=true` call per project/environment pair — there is no
+  tree to walk. Requires an Infisical with the v4 secrets API.
+
+Selections print as one JSON object keyed by the path, and a value that is itself
+a JSON object is nested rather than escaped — same as `cu aws secrets`:
+
+```console
+$ cu vault -p prod secrets --path secret/team
+[*] Listing secrets from prod (vault)
+[*] Searching KV v2 mount(s): secret
+[*] Found 12 secret(s). Opening fzf for selection...
+{
+  "secret/team/backend/db": {
+    "password": "super-secret-value",
+    "username": "app"
+  }
+}
+```
+
+```console
+$ cu vault -p inf-prod secrets
+[*] Listing secrets from inf-prod (infisical)
+[*] Searching 6 project/environment pair(s)
+[*] Found 84 secret(s). Opening fzf for selection...
+{
+  "orders-service/production/db/DB_PASSWORD": "super-secret-value"
+}
+```
+
+A Vault line names a secret and prints all of its keys; an Infisical line names a
+single key, since that is the unit Infisical stores.
+
+On Infisical Cloud, listing with no `--path` costs one API call per
+project/environment pair against a limit of 120 secret reads a minute on the Free
+plan (300 on Pro). Concurrency is capped at 8; self-hosted instances are
+unlimited.
 
 ### Kubernetes Operations
 
@@ -729,6 +848,7 @@ and `$FZF_DEFAULT_OPTS_FILE` are honored exactly as usual.
 | `cu os` | `history` |
 | `cu k` | `secrets`, `configmaps`, `logs`, `ctx`, `ns` |
 | `cu diff` | `-f <a> -f <b>`, `--config <config.yaml>` |
+| `cu vault` | `secrets` |
 | `cu pwpush` | `config`, `send`, `list-active`, `pwgen` |
 | `cu task` | forwards to `task -t <taskfile> -d <dir> ...` |
 

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -40,11 +41,14 @@ Example:
 		RunE: func(_ *cobra.Command, args []string) error {
 			binary, err := exec.LookPath("task")
 			if err != nil {
-				return fmt.Errorf("task not found in PATH — install it from https://taskfile.dev")
+				return errors.New("task not found in PATH — install it from https://taskfile.dev")
 			}
 
 			argv := append([]string{"task", "-t", taskfile, "-d", directory}, args...)
-			return syscall.Exec(binary, argv, os.Environ())
+			if err := syscall.Exec(binary, argv, os.Environ()); err != nil {
+				return fmt.Errorf("could not exec %s: %w", binary, err)
+			}
+			return nil
 		},
 	}
 
@@ -64,12 +68,11 @@ Example:
 
 // configHome is where cu keeps its own config: ~/.config/cu.
 func configHome() string {
-	if dir, err := os.UserConfigDir(); err == nil {
-		return filepath.Join(dir, "cu")
-	}
-	home, err := os.UserHomeDir()
+	// UserConfigDir already falls back to $HOME/.config, so it only fails when
+	// neither $XDG_CONFIG_HOME nor $HOME is set.
+	dir, err := os.UserConfigDir()
 	if err != nil {
 		return ".config/cu"
 	}
-	return filepath.Join(home, ".config", "cu")
+	return filepath.Join(dir, "cu")
 }

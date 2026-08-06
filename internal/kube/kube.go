@@ -47,7 +47,7 @@ func run(args ...string) ([]byte, error) {
 		}
 		return nil, fmt.Errorf("kubectl %s failed: %s", strings.Join(args, " "), detail)
 	}
-	if _, lookErr := exec.LookPath("kubectl"); lookErr != nil {
+	if errors.Is(err, exec.ErrNotFound) {
 		return nil, fmt.Errorf("kubectl not found in PATH")
 	}
 	return nil, fmt.Errorf("kubectl %s failed: %w", strings.Join(args, " "), err)
@@ -107,10 +107,13 @@ func ListContexts() ([]string, error) {
 // names are unique, so there is nothing to sort or dedupe here.
 func ListNamespaces() ([]string, error) {
 	names, err := runLines("get", "namespaces", "-o", "name")
+	if err != nil {
+		return nil, err
+	}
 	for i, name := range names {
 		names[i] = strings.TrimPrefix(name, "namespace/")
 	}
-	return names, err
+	return names, nil
 }
 
 // ListSecretKeys returns one entry per Secret data/stringData key.
@@ -134,9 +137,9 @@ func scopeArgs(args []string, allNamespaces bool, namespace string) []string {
 	return args
 }
 
-// keyedItem covers Secrets and ConfigMaps alike. All three data fields are
-// string-keyed maps and none of them collide — a Secret carries data and
-// stringData, a ConfigMap data and binaryData — so listing can just union them.
+// keyedItem covers Secrets and ConfigMaps alike: a Secret carries data and
+// stringData, a ConfigMap data and binaryData. Listing unions the three, and
+// deduplicates because a key can appear in more than one of them.
 type keyedItem struct {
 	Metadata   objectMeta        `json:"metadata"`
 	Data       map[string]string `json:"data"`
@@ -297,8 +300,7 @@ func StreamLogs(pod Pod, follow bool, tail int, w io.Writer) error {
 	return nil
 }
 
-// UseContext switches the current kubeconfig context. kubectl's confirmation
-// goes to stderr, keeping stdout free for data.
+// UseContext switches the current kubeconfig context.
 func UseContext(name string) error {
 	return configure("config", "use-context", name)
 }
@@ -308,6 +310,8 @@ func UseNamespace(name string) error {
 	return configure("config", "set-context", "--current", "--namespace", name)
 }
 
+// configure runs a kubectl config subcommand, relaying kubectl's confirmation
+// to stderr so stdout stays free for data.
 func configure(args ...string) error {
 	out, err := run(args...)
 	if len(out) > 0 {

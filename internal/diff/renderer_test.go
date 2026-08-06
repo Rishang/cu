@@ -18,7 +18,7 @@ func capture(t *testing.T) (stdout, stderr *bytes.Buffer) {
 	ui.Out, ui.Err = stdout, stderr
 	ui.SetColor(false)
 	t.Cleanup(func() {
-		ui.Out, ui.Err, _ = prevOut, prevErr, prevColor
+		ui.Out, ui.Err = prevOut, prevErr
 		ui.SetColor(prevColor)
 	})
 	return stdout, stderr

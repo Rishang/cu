@@ -98,6 +98,7 @@ func NewRootCommand() *cobra.Command {
 		newOSCommand(),
 		newK8sCommand(),
 		newPwpushCommand(),
+		newVaultCommand(),
 		newDiffCommand(),
 		newTaskCommand(),
 	)

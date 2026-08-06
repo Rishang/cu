@@ -158,3 +158,43 @@ func TestWriteInClusterKubeconfigDefaults(t *testing.T) {
 		t.Errorf("want the default namespace with no namespace file:\n%s", config)
 	}
 }
+
+// TestKubectlEnvUsesInClusterKubeconfig is the wiring check: with a pod config
+// resolved, every kubectl call must run against it even though the environment
+// names no kubeconfig at all. Swapping the resolver keeps this independent of
+// which test happened to warm its cache first.
+func TestKubectlEnvUsesInClusterKubeconfig(t *testing.T) {
+	if _, err := exec.LookPath("kubectl"); err != nil {
+		t.Skip("kubectl not available")
+	}
+	stubServiceAccount(t)
+
+	path, err := writeInClusterKubeconfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	prev := inClusterKubeconfig
+	inClusterKubeconfig = func() string { return path }
+	t.Cleanup(func() { inClusterKubeconfig = prev })
+
+	env := kubectlEnv()
+	if len(env) == 0 || env[len(env)-1] != "KUBECONFIG="+path {
+		t.Fatalf("kubectlEnv() does not end with the in-cluster KUBECONFIG: %v", env[max(0, len(env)-3):])
+	}
+
+	// The real proof: kubectl resolves the pod's context with nothing in the
+	// environment pointing at a config.
+	t.Setenv("KUBECONFIG", "")
+	if got := CurrentContext(); got != "in-cluster" {
+		t.Errorf("CurrentContext() = %q, want in-cluster — the config is not reaching kubectl", got)
+	}
+	if got := CurrentNamespace(); got != "payments" {
+		t.Errorf("CurrentNamespace() = %q, want the pod's namespace", got)
+	}
+
+	// And with no pod config, kubectl inherits this process's environment.
+	inClusterKubeconfig = func() string { return "" }
+	if env := kubectlEnv(); env != nil {
+		t.Errorf("kubectlEnv() = %v, want nil so the child inherits", env)
+	}
+}

@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/Rishang/cloudutil/internal/cli"
 	"github.com/Rishang/cloudutil/internal/ui"
@@ -20,7 +23,13 @@ func main() {
 	root := cli.NewRootCommand()
 	root.Version = fmt.Sprintf("%s (commit %s, built %s)", version, commit, date)
 
-	err := root.Execute()
+	// Ctrl-C cancels in-flight work (a Vault walk, an SSM call) instead of
+	// only killing the process; stop() restores the default handler so a
+	// second Ctrl-C still aborts if a command ignores its context.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	err := root.ExecuteContext(ctx)
 	if err == nil {
 		return
 	}

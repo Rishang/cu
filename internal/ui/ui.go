@@ -26,6 +26,10 @@ var (
 	Err io.Writer = os.Stderr
 )
 
+// ResetCursor returns the cursor to column 0. A child process handed the tty
+// back can leave it mid-line, which would otherwise indent whatever prints next.
+func ResetCursor() { fmt.Fprint(Err, "\r") }
+
 // Style is a set of ANSI SGR parameters, e.g. "1;31" for bold red.
 type Style struct{ code string }
 

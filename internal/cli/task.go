@@ -65,14 +65,3 @@ Example:
 	cmd.Flags().StringVarP(&directory, "directory", "d", cwd, "Directory to run tasks in.")
 	return cmd
 }
-
-// configHome is where cu keeps its own config: ~/.config/cu.
-func configHome() string {
-	// UserConfigDir already falls back to $HOME/.config, so it only fails when
-	// neither $XDG_CONFIG_HOME nor $HOME is set.
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		return ".config/cu"
-	}
-	return filepath.Join(dir, "cu")
-}

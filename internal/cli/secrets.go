@@ -135,9 +135,9 @@ func newSecretStore(ctx context.Context, profile secretProvider) (secretStore, e
 	}
 }
 
-// listConcurrency bounds in-flight list calls per backend. Vault's own client
-// defaults to 16 idle connections per host, so going wider mostly buys new
-// sockets, and Infisical's cloud rate limits start at 120 secret reads a minute.
+// listConcurrency bounds in-flight list calls per backend. httpClient keeps an
+// idle connection for each one, so going wider mostly buys new sockets, and
+// Infisical's cloud rate limits start at 120 secret reads a minute.
 const listConcurrency = 8
 
 func newVaultCommand() *cobra.Command {
@@ -259,12 +259,24 @@ func denied(err error) bool {
 		(apiErr.status == http.StatusForbidden || apiErr.status == http.StatusNotFound)
 }
 
+// httpClient is the one client every REST call in cu goes through: the secret
+// backends and pwpush. DefaultTransport allows only 2 idle connections per
+// host, so a listConcurrency-wide fan-out would drop most of its connections
+// and pay a fresh TLS handshake on the next level of the walk.
+var httpClient = &http.Client{Transport: idleTransport()}
+
+func idleTransport() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.MaxIdleConnsPerHost = listConcurrency
+	return t
+}
+
 // apiRequest performs a JSON API call and returns the response body. Both
 // backends talk plain REST, so they share one round-tripper; headers is what
 // distinguishes them.
 func apiRequest(ctx context.Context, method, url string, headers map[string]string, body []byte) ([]byte, error) {
-	// http.DefaultClient has no timeout of its own, so a black-holed endpoint
-	// would hang the command forever. Per call, since a walk makes many.
+	// The client has no timeout of its own, so a black-holed endpoint would
+	// hang the command forever. Per call, since a walk makes many.
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
@@ -285,7 +297,7 @@ func apiRequest(ctx context.Context, method, url string, headers map[string]stri
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}

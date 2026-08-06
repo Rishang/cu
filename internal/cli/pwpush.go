@@ -209,7 +209,7 @@ func newPwpushSendCommand() *cobra.Command {
 				}
 				payload = strings.TrimSpace(string(content))
 			default:
-				edited, err := captureFromEditor("payload.txt", "")
+				edited, err := captureFromEditor("payload.txt")
 				if err != nil {
 					return err
 				}

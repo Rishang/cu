@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -251,18 +249,6 @@ func newAWSSecretsCommand() *cobra.Command {
 	return cmd
 }
 
-// decodeSecretValue nests JSON secrets in the output and passes anything else
-// through as a plain string.
-func decodeSecretValue(value string) any {
-	var parsed any
-	if json.Unmarshal([]byte(value), &parsed) == nil {
-		if _, isObject := parsed.(map[string]any); isObject {
-			return parsed
-		}
-	}
-	return value
-}
-
 func newDecodeMessageCommand() *cobra.Command {
 	var (
 		creds   awsProfileFlags
@@ -276,7 +262,7 @@ func newDecodeMessageCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			encoded := strings.TrimSpace(message)
 			if encoded == "" {
-				edited, err := captureFromEditor("encoded_message.txt", "")
+				edited, err := captureFromEditor("encoded_message.txt")
 				if err != nil {
 					return err
 				}
@@ -304,53 +290,4 @@ func newDecodeMessageCommand() *cobra.Command {
 	creds.register(cmd)
 	cmd.Flags().StringVar(&message, "message", "", "Encoded authorization failure message.")
 	return cmd
-}
-
-// captureFromEditor opens $EDITOR on a temp file and returns what was written.
-func captureFromEditor(name, initial string) (string, error) {
-	dir, err := os.MkdirTemp("", "cu-")
-	if err != nil {
-		return "", err
-	}
-	defer os.RemoveAll(dir)
-
-	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, []byte(initial), 0o600); err != nil {
-		return "", err
-	}
-
-	editor := os.Getenv("EDITOR")
-	if editor == "" {
-		editor = "vim"
-		if _, err := exec.LookPath(editor); err != nil {
-			editor = "nano"
-		}
-	}
-	cmd := exec.Command(editor, path)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stderr, os.Stderr
-	runErr := cmd.Run()
-	// The editor can hand back control mid-line; put the cursor back at
-	// column 0 before anything else prints, regardless of why.
-	fmt.Fprint(os.Stderr, "\r")
-	if runErr != nil {
-		return "", fmt.Errorf("editor %q failed: %w", editor, runErr)
-	}
-
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	return string(content), nil
-}
-
-// openBrowser opens a URL with the platform's default handler.
-func openBrowser(url string) error {
-	openers := []string{"xdg-open", "open", "wslview"}
-	for _, opener := range openers {
-		if binary, err := exec.LookPath(opener); err == nil {
-			ui.Info("Opening URL in your default browser (%s)...", opener)
-			return exec.Command(binary, url).Start()
-		}
-	}
-	return fmt.Errorf("no browser opener found (tried %s)", strings.Join(openers, ", "))
 }

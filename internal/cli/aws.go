@@ -195,7 +195,7 @@ func newEC2SSMCommand() *cobra.Command {
 			}
 
 			// Replaces this process, so nothing after this line runs.
-			return awsx.StartSession(selected[0].ID, tunnel)
+			return awsx.StartSession(ctx, cfg, selected[0].ID, tunnel)
 		},
 	}
 

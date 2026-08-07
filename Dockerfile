@@ -22,15 +22,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     groff \
     less \
     openssh-client \
-    unzip \
     && rm -rf /var/lib/apt/lists/*
 
-# AWS CLI v2 and the Session Manager plugin, for `cu aws ec2-ssm`.
-RUN curl -fsSL "https://awscliv2.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
-    unzip -q awscliv2.zip && \
-    ./aws/install && \
-    rm -rf awscliv2.zip aws
-
+# Session Manager plugin, for `cu aws ec2-ssm` (cu talks to SSM via the AWS
+# SDK directly; only the interactive data-channel protocol needs the plugin).
 RUN curl -fsSL "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb" \
     -o "session-manager-plugin.deb" && \
     dpkg -i session-manager-plugin.deb && \

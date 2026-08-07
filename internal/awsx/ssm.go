@@ -120,33 +120,63 @@ type Tunnel struct {
 	LocalPort  int
 }
 
-// StartSession replaces this process with `aws ssm start-session`, which owns
-// the terminal for the duration of the session.
+// StartSession opens an SSM session via the SDK and replaces this process
+// with session-manager-plugin, which owns the terminal for the session's
+// duration and speaks the actual data-channel protocol.
 //
-// The aws CLI is used rather than the SDK because an interactive session also
-// needs the separately-installed session-manager-plugin.
-func StartSession(instanceID string, t Tunnel) error {
-	binary, err := exec.LookPath("aws")
+// session-manager-plugin is a separate install (there's no Go client for its
+// protocol), but the aws CLI itself is not needed: the SDK starts the session
+// and the plugin is invoked with the same argv the CLI would pass it.
+func StartSession(ctx context.Context, cfg aws.Config, instanceID string, t Tunnel) error {
+	binary, err := exec.LookPath("session-manager-plugin")
 	if err != nil {
-		return errors.New("aws CLI not found in PATH — required for SSM sessions")
+		return errors.New("session-manager-plugin not found in PATH — required for SSM sessions")
 	}
 
-	argv := []string{"aws", "ssm", "start-session", "--target", instanceID}
+	input := &ssm.StartSessionInput{Target: aws.String(instanceID)}
 	if t.Enabled {
 		if t.RemoteHost == "" || t.RemotePort == 0 || t.LocalPort == 0 {
 			return errors.New("--remote-host, --remote-port and --local-port are all required for tunneling")
 		}
-		// Marshalled as a single argv entry: no shell, so no quoting to get wrong.
-		params, err := json.Marshal(map[string][]string{
+		input.DocumentName = aws.String(portForwardDocument)
+		input.Parameters = map[string][]string{
 			"host":            {t.RemoteHost},
 			"portNumber":      {strconv.Itoa(t.RemotePort)},
 			"localPortNumber": {strconv.Itoa(t.LocalPort)},
-		})
-		if err != nil {
-			return fmt.Errorf("could not encode tunnel parameters: %w", err)
 		}
-		argv = append(argv, "--document-name", portForwardDocument, "--parameters", string(params))
 	}
 
+	client := ssm.NewFromConfig(cfg)
+	out, err := client.StartSession(ctx, input)
+	if err != nil {
+		return fmt.Errorf("ssm start-session failed: %w", err)
+	}
+
+	response, err := json.Marshal(sessionResponse{
+		SessionId:  aws.ToString(out.SessionId),
+		TokenValue: aws.ToString(out.TokenValue),
+		StreamUrl:  aws.ToString(out.StreamUrl),
+	})
+	if err != nil {
+		return fmt.Errorf("could not encode session response: %w", err)
+	}
+	request, err := json.Marshal(input)
+	if err != nil {
+		return fmt.Errorf("could not encode session request: %w", err)
+	}
+
+	// ponytail: assumes the standard AWS partition endpoint format; wrong for
+	// China/GovCloud, fix by resolving via the ssm client's endpoint resolver
+	// if that's ever needed.
+	endpoint := fmt.Sprintf("https://ssm.%s.amazonaws.com", cfg.Region)
+	argv := []string{binary, string(response), cfg.Region, "StartSession", "", string(request), endpoint}
 	return syscall.Exec(binary, argv, os.Environ())
+}
+
+// sessionResponse mirrors the JSON session-manager-plugin expects as its
+// first argument, which does not match ssm.StartSessionOutput's field tags.
+type sessionResponse struct {
+	SessionId  string `json:"SessionId"`
+	TokenValue string `json:"TokenValue"`
+	StreamUrl  string `json:"StreamUrl"`
 }

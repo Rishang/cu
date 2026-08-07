@@ -1,12 +1,13 @@
 repos:
-- repo: https://github.com/astral-sh/ruff-pre-commit
-  # Ruff version.
-  rev: v0.15.6
+- repo: local
   hooks:
-    # Run the linter.
-    - id: ruff-check
-    # Run the formatter.
-    - id: ruff-format
+    # cu is Go now (see AGENTS.md); this mirrors `task lint`.
+    - id: go-lint
+      name: go-lint
+      entry: task lint
+      language: system
+      files: \.go$
+      pass_filenames: false
 
 - repo: https://github.com/gitleaks/gitleaks
   rev: v8.30.1

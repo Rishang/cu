@@ -64,8 +64,8 @@ Nothing at all for `cu diff`, `cu os history` and `cu pwpush` — the binary is
 static and `fzf` is compiled in. The remaining commands drive tools you almost
 certainly already have:
 
-- [Only for AWS operations] AWS CLI configured with credentials (`cu aws ec2-ssm` also needs the [Session Manager plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html))
-- [Only for Azure operations] Azure CLI (`az login` must be run primarily)
+- [Only for AWS operations] AWS credentials configured (`~/.aws` or env vars — no AWS CLI install needed; `cu aws ec2-ssm` also needs the [Session Manager plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html))
+- [Only for Azure operations] Azure credentials configured (env vars, managed identity, or `az login` — no Azure CLI install needed unless you use `az login`)
 - [Only for Kubernetes operations] `kubectl` configured with access to your target cluster — or a pod with a mounted ServiceAccount, see [Running inside a pod](#running-inside-a-pod)
 - [Only for Taskfile operations] [Taskfile](https://taskfile.dev/) installed and configured
 - [Only for Password Pusher operations] [Password Pusher](https://pwpush.com/) configured

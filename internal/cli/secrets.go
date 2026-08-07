@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -117,20 +118,101 @@ type secretStore interface {
 	list(ctx context.Context, prefix string) ([]secretRef, error)
 }
 
+// canonicalProvider folds a provider name onto the spelling the env vars and the
+// dial switch use. "vault" was the original name for the HashiCorp backend, so
+// existing secret_providers.yml files keep working.
+func canonicalProvider(name string) string {
+	name = strings.ToLower(name)
+	if name == "vault" {
+		return "hashicorp"
+	}
+	return name
+}
+
+// envOverlay layers VAULT_* over a profile, keyed by the profile's own
+// provider: VAULT_HASHICORP_TOKEN, VAULT_INFISICAL_CLIENT_ID and so on. The
+// environment wins over the file because an export is scoped to this
+// invocation while the file is the standing default — that is what lets a
+// container or CI job override one credential without rewriting the config.
+//
+// Each key is the field's yaml tag, uppercased, so a field added to
+// secretProvider is settable from the environment without touching this code.
+func envOverlay(p secretProvider) secretProvider {
+	p.Provider = canonicalProvider(p.Provider)
+	if p.Provider == "" {
+		return p
+	}
+	applyEnv(reflect.ValueOf(&p).Elem(), "VAULT_"+strings.ToUpper(p.Provider)+"_")
+	return p
+}
+
+// applyEnv sets each string field of v from prefix + its uppercased yaml tag,
+// flattening nested structs onto the same prefix so credentials.token reads
+// VAULT_<PROVIDER>_TOKEN. Empty and unset mean the same thing: fall through to
+// whatever the file had.
+func applyEnv(v reflect.Value, prefix string) {
+	t := v.Type()
+	for i := range t.NumField() {
+		tag, _, _ := strings.Cut(t.Field(i).Tag.Get("yaml"), ",")
+		field := v.Field(i)
+		switch {
+		case field.Kind() == reflect.Struct:
+			applyEnv(field, prefix)
+		// profile and provider are how the profile was chosen in the first
+		// place; letting a VAULT_<PROVIDER>_PROVIDER re-point it mid-overlay
+		// would just be a way to disagree with the prefix already in hand.
+		case tag == "" || tag == "profile" || tag == "provider":
+		case field.Kind() == reflect.String && field.CanSet():
+			if value := os.Getenv(prefix + strings.ToUpper(tag)); value != "" {
+				field.SetString(value)
+			}
+		}
+	}
+}
+
+// resolveSecretProfile picks the profile a command runs against. A bare
+// VAULT_PROVIDER export is a whole connection on its own, so it stands in for
+// the config file rather than being merged into a profile nobody asked for;
+// once --profile or $VAULT_PROFILE names one, the environment overrides that
+// profile's fields but not which backend it is.
+func resolveSecretProfile(name string) (secretProvider, error) {
+	envProvider := canonicalProvider(os.Getenv("VAULT_PROVIDER"))
+	if name == "" && envProvider != "" {
+		return envOverlay(secretProvider{Profile: "env", Provider: envProvider}), nil
+	}
+	profiles, err := loadSecretProviders()
+	if err != nil {
+		return secretProvider{}, err
+	}
+	selected, err := resolveProfile(profiles, name)
+	if err != nil {
+		return secretProvider{}, err
+	}
+	// Re-pointing a named profile at the other backend would keep the file's
+	// endpoint and credentials and read the wrong VAULT_* block over them,
+	// which can only end in a puzzling 401. Name the disagreement instead.
+	if envProvider != "" && envProvider != canonicalProvider(selected.Provider) {
+		return secretProvider{}, fmt.Errorf(
+			"profile %q is %s but $VAULT_PROVIDER is %s — unset one of them",
+			selected.Profile, selected.Provider, envProvider)
+	}
+	return envOverlay(selected), nil
+}
+
 // newSecretStore dials the backend a profile names.
 func newSecretStore(ctx context.Context, profile secretProvider) (secretStore, error) {
 	if profile.Endpoint == "" {
 		return nil, fmt.Errorf("profile %q has no endpoint", profile.Profile)
 	}
-	switch profile.Provider {
-	case "vault":
+	switch canonicalProvider(profile.Provider) {
+	case "hashicorp":
 		return newVaultClient(ctx, profile)
 	case "infisical":
 		return newInfisicalClient(ctx, profile)
 	case "":
 		return nil, fmt.Errorf("profile %q has no provider", profile.Profile)
 	default:
-		return nil, fmt.Errorf("profile %q has unknown provider %q (want vault or infisical)",
+		return nil, fmt.Errorf("profile %q has unknown provider %q (want hashicorp or infisical)",
 			profile.Profile, profile.Provider)
 	}
 }
@@ -148,7 +230,11 @@ func newVaultCommand() *cobra.Command {
 		Short: "Browse secret providers — HashiCorp Vault and Infisical",
 		Long: "Browse the secret backends configured in " + secretProvidersPath() + ".\n\n" +
 			"Each profile there names its provider, so one command covers both. With no\n" +
-			"--profile and more than one configured, fzf asks which.",
+			"--profile and more than one configured, fzf asks which.\n\n" +
+			"$VAULT_PROVIDER (hashicorp or infisical) configures a connection without the\n" +
+			"file at all, from VAULT_<PROVIDER>_ENDPOINT, _TOKEN, _USERNAME, _PASSWORD,\n" +
+			"_CLIENT_ID, _CLIENT_SECRET and _NAMESPACE. Those override the matching fields\n" +
+			"of a named profile too.",
 	}
 	// Persistent so both `cu vault -p x secrets` and `cu vault secrets -p x` work.
 	// The flag wins over VAULT_PROFILE, which wins over "ask if ambiguous".
@@ -180,11 +266,7 @@ With no --path, everything the credentials can see is listed. See the README for
 the full mapping.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			profiles, err := loadSecretProviders()
-			if err != nil {
-				return err
-			}
-			selected, err := resolveProfile(profiles, *profile)
+			selected, err := resolveSecretProfile(*profile)
 			if err != nil {
 				return err
 			}

@@ -8,23 +8,21 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
 	"time"
 
-	yaml "github.com/goccy/go-yaml"
 	"github.com/spf13/cobra"
 
 	"github.com/Rishang/cloudutil/internal/pick"
 	"github.com/Rishang/cloudutil/internal/ui"
 )
 
-// secretProvider is one entry in the profile list at
-// ~/.config/cu/secret_providers.yml. Entries are keyed by provider so a single
-// command can browse several backends; see the README for the shape.
-// Credentials carry whichever of the fields the provider actually supports.
+// secretProvider is one entry in the "vault" list of ~/.config/cu/config.yml.
+// Entries are keyed by provider so a single command can browse several
+// backends; see the README for the shape. Credentials carry whichever of the
+// fields the provider actually supports.
 type secretProvider struct {
 	Profile     string `yaml:"profile"`
 	Provider    string `yaml:"provider"`
@@ -42,30 +40,16 @@ type secretProvider struct {
 	} `yaml:"credentials"`
 }
 
-func secretProvidersPath() string { return filepath.Join(configHome(), "secret_providers.yml") }
-
-// loadSecretProviders reads the profile list.
+// loadSecretProviders reads the "vault" profile list from config.yml.
 func loadSecretProviders() ([]secretProvider, error) {
-	data, err := os.ReadFile(secretProvidersPath())
+	cfg, err := loadConfig()
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("no providers configured — create %s", secretProvidersPath())
-		}
 		return nil, err
 	}
-	// The file holds tokens and client secrets in plaintext, like psst.json, so
-	// say so when anyone else on the box can read it.
-	if info, err := os.Stat(secretProvidersPath()); err == nil && info.Mode().Perm()&0o077 != 0 {
-		ui.Warn("%s is readable by other users — chmod 600 it.", secretProvidersPath())
+	if len(cfg.Vault) == 0 {
+		return nil, fmt.Errorf("no vault profiles configured — add a \"vault:\" list to %s", configPath())
 	}
-	var profiles []secretProvider
-	if err := yaml.Unmarshal(data, &profiles); err != nil {
-		return nil, fmt.Errorf("could not parse %s: %w", secretProvidersPath(), err)
-	}
-	if len(profiles) == 0 {
-		return nil, fmt.Errorf("no profiles in %s", secretProvidersPath())
-	}
-	return profiles, nil
+	return cfg.Vault, nil
 }
 
 // resolveProfile picks the named profile, the only one, or asks.
@@ -76,7 +60,7 @@ func resolveProfile(profiles []secretProvider, name string) (secretProvider, err
 				return profile, nil
 			}
 		}
-		return secretProvider{}, fmt.Errorf("no profile %q in %s", name, secretProvidersPath())
+		return secretProvider{}, fmt.Errorf("no profile %q in %s", name, configPath())
 	}
 	if len(profiles) == 1 {
 		return profiles[0], nil
@@ -120,7 +104,7 @@ type secretStore interface {
 
 // canonicalProvider folds a provider name onto the spelling the env vars and the
 // dial switch use. "vault" was the original name for the HashiCorp backend, so
-// existing secret_providers.yml files keep working.
+// existing config files keep working.
 func canonicalProvider(name string) string {
 	name = strings.ToLower(name)
 	if name == "vault" {
@@ -228,7 +212,7 @@ func newVaultCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "vault",
 		Short: "Browse secret providers — HashiCorp Vault and Infisical",
-		Long: "Browse the secret backends configured in " + secretProvidersPath() + ".\n\n" +
+		Long: "Browse the secret backends listed under \"vault:\" in " + configPath() + ".\n\n" +
 			"Each profile there names its provider, so one command covers both. With no\n" +
 			"--profile and more than one configured, fzf asks which.\n\n" +
 			"$VAULT_PROVIDER (hashicorp or infisical) configures a connection without the\n" +
@@ -239,7 +223,7 @@ func newVaultCommand() *cobra.Command {
 	// Persistent so both `cu vault -p x secrets` and `cu vault secrets -p x` work.
 	// The flag wins over VAULT_PROFILE, which wins over "ask if ambiguous".
 	cmd.PersistentFlags().StringVarP(&profile, "profile", "p", os.Getenv("VAULT_PROFILE"),
-		"Profile from "+secretProvidersPath()+" [$VAULT_PROFILE].")
+		"Profile from the \"vault:\" list in "+configPath()+" [$VAULT_PROFILE].")
 	cmd.AddCommand(newSecretsCommand(&profile))
 	return cmd
 }

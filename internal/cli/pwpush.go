@@ -10,7 +10,6 @@ import (
 	"math/big"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -20,28 +19,22 @@ import (
 	"github.com/Rishang/cloudutil/internal/ui"
 )
 
-// pwpushConfig is persisted at ~/.config/cu/psst.json.
+// pwpushConfig is the "psst" section of ~/.config/cu/config.yml.
 type pwpushConfig struct {
-	Token  string `json:"token"`
-	Source string `json:"source"`
-	Email  string `json:"email,omitempty"`
+	Token  string `yaml:"token"`
+	Source string `yaml:"source"`
+	Email  string `yaml:"email,omitempty"`
 }
 
-func pwpushConfigPath() string { return filepath.Join(configHome(), "psst.json") }
-
 func loadPwpushConfig() (*pwpushConfig, error) {
-	data, err := os.ReadFile(pwpushConfigPath())
+	cfg, err := loadConfig()
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, errors.New("no configuration found — run 'cu pwpush config' first")
-		}
 		return nil, err
 	}
-	cfg := &pwpushConfig{}
-	if err := json.Unmarshal(data, cfg); err != nil {
-		return nil, fmt.Errorf("could not parse %s: %w", pwpushConfigPath(), err)
+	if cfg.Psst.Token == "" {
+		return nil, errors.New("no configuration found — run 'cu pwpush config' first")
 	}
-	return cfg, nil
+	return &cfg.Psst, nil
 }
 
 // headers picks Bearer auth for pwpush.com and legacy header auth for
@@ -84,23 +77,15 @@ func newPwpushConfigCommand() *cobra.Command {
 		RunE: func(_ *cobra.Command, _ []string) error {
 			cfg.Source = strings.TrimRight(cfg.Source, "/")
 
-			if err := os.MkdirAll(configHome(), 0o700); err != nil {
-				return err
-			}
-			data, err := json.Marshal(cfg)
+			full, err := loadConfig()
 			if err != nil {
 				return err
 			}
-			// Contains an API token: keep it owner-readable only.
-			if err := os.WriteFile(pwpushConfigPath(), data, 0o600); err != nil {
+			full.Psst = *cfg
+			if err := saveConfig(full); err != nil {
 				return err
 			}
-			// WriteFile's mode applies only on creation; enforce it too when a
-			// pre-existing config file had broader permissions.
-			if err := os.Chmod(pwpushConfigPath(), 0o600); err != nil {
-				return err
-			}
-			ui.Printf("Saved auth config to %s", pwpushConfigPath())
+			ui.Printf("Saved auth config to %s", configPath())
 			return nil
 		},
 	}

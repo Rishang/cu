@@ -56,6 +56,7 @@ func TestSecretProvidersConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	doc := `
+vault:
 - profile: prod
   provider: vault
   endpoint: https://vault.example.com
@@ -72,7 +73,7 @@ func TestSecretProvidersConfig(t *testing.T) {
   provider: someday
   endpoint: https://example.com
 `
-	if err := os.WriteFile(secretProvidersPath(), []byte(doc), 0o600); err != nil {
+	if err := os.WriteFile(configPath(), []byte(doc), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -119,7 +120,7 @@ func TestSecretProvidersConfig(t *testing.T) {
 	stderr := &bytes.Buffer{}
 	ui.Err = stderr
 	t.Cleanup(func() { ui.Err = prevErr })
-	if err := os.Chmod(secretProvidersPath(), 0o644); err != nil {
+	if err := os.Chmod(configPath(), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := loadSecretProviders(); err != nil {
@@ -139,6 +140,7 @@ func TestSecretProfileFromEnv(t *testing.T) {
 		t.Fatal(err)
 	}
 	doc := `
+vault:
 - profile: prod
   provider: vault
   endpoint: https://file.example.com
@@ -146,7 +148,7 @@ func TestSecretProfileFromEnv(t *testing.T) {
     token: s.file
     namespace: eng
 `
-	if err := os.WriteFile(secretProvidersPath(), []byte(doc), 0o600); err != nil {
+	if err := os.WriteFile(configPath(), []byte(doc), 0o600); err != nil {
 		t.Fatal(err)
 	}
 

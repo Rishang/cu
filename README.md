@@ -311,33 +311,57 @@ that parses as a JSON object is printed as nested JSON instead of a raw string.
 ### Secret Providers (`vault`)
 
 Unlike AWS and Azure, HashiCorp Vault and Infisical have no ambient credential
-chain, so connections come from `~/.config/cu/secret_providers.yml`. It is a list
-of profiles, each naming its `provider`, so one command browses both backends:
+chain, so connections come from the `vault:` list in `~/.config/cu/config.yml`.
+Each entry names its `provider`, so one command browses both backends:
 
 ```yaml
-- profile: prod
-  provider: hashicorp        # "vault" still works, it was the old name
-  endpoint: https://vault.example.com
-  credentials:
-    # Either a token, or a username and password for the userpass auth method.
-    token: hvs.CAESxxxx
-    username: ""
-    password: ""
-    namespace: default        # Vault Enterprise namespace; omit on OSS
+vault:
+  - profile: prod
+    provider: hashicorp        # "vault" still works, it was the old name
+    endpoint: https://vault.example.com
+    credentials:
+      # Either a token, or a username and password for the userpass auth method.
+      token: hvs.CAESxxxx
+      username: ""
+      password: ""
+      namespace: default        # Vault Enterprise namespace; omit on OSS
 
-- profile: inf-prod
-  provider: infisical
-  endpoint: https://us.infisical.com   # or eu.infisical.com, or self-hosted
-  credentials:
-    # Either a machine identity access token (Token Auth), used as-is...
-    token: st.xxxxx
-    # ...or a Universal Auth pair, exchanged for a short-lived token at startup.
-    client_id: 8f1a...
-    client_secret: 4c2b...
-    namespace: my-org         # organizationSlug; only for sub-organizations
+  - profile: inf-prod
+    provider: infisical
+    endpoint: https://us.infisical.com   # or eu.infisical.com, or self-hosted
+    credentials:
+      # Either a machine identity access token (Token Auth), used as-is...
+      token: st.xxxxx
+      # ...or a Universal Auth pair, exchanged for a short-lived token at startup.
+      client_id: 8f1a...
+      client_secret: 4c2b...
+      namespace: my-org         # organizationSlug; only for sub-organizations
 ```
 
-Keep it owner-readable only: `chmod 600 ~/.config/cu/secret_providers.yml`.
+Keep it owner-readable only: `chmod 600 ~/.config/cu/config.yml`.
+
+Any value in `config.yml` (`psst` included) can reference an environment
+variable instead of holding the secret in the file: `token: ${VAULT_TOKEN}` is
+replaced with `$VAULT_TOKEN`'s value when the file is loaded. An unset
+variable expands to empty; bare `$VAR` (no braces) is left untouched.
+
+```yaml
+psst:
+  token: ${PSST_TOKEN}
+  source: https://pwpush.example.com
+
+vault:
+  - profile: prod
+    provider: hashicorp
+    endpoint: https://vault.example.com
+    credentials:
+      token: ${VAULT_PROD_TOKEN}
+```
+
+```bash
+export PSST_TOKEN=... VAULT_PROD_TOKEN=...
+cu pwpush list-active   # config.yml never holds the raw tokens on disk
+```
 
 Infisical's public API authenticates **machine identities only** — email and
 password are for the web dashboard and its own CLI, which use an SRP exchange
@@ -381,7 +405,7 @@ export VAULT_INFISICAL_NAMESPACE=my-org
 Two traps worth knowing:
 
 - `VAULT_PROVIDER` alone is a whole connection, so with it set and no `--profile`
-  (or `VAULT_PROFILE`) `cu` never reads `secret_providers.yml` — it will not
+  (or `VAULT_PROFILE`) `cu` never reads the `vault:` list — it will not
   prompt for a profile either. Name a profile and the environment goes back to
   overriding only the fields it sets; the profile's own `provider` decides which
   block is read, and a `VAULT_PROVIDER` that contradicts it is an error rather
@@ -884,7 +908,7 @@ cu pwpush pwgen --length 24
 ```
 
 Notes:
-- Config is stored at `~/.config/cu/psst.json`, mode `0600` — it holds an API token.
+- Config is stored under the `psst:` key of `~/.config/cu/config.yml`, mode `0600` — it holds an API token.
 - `send` uses bearer auth when no email is stored in config; legacy header auth when `email` is present in the saved config.
 
 ## 🎯 Interactive Selection

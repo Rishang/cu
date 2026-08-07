@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	yaml "github.com/goccy/go-yaml"
 )
 
 // These cases deliberately stop before awsx.LoadConfig: they freeze the local
@@ -104,7 +106,7 @@ func TestPwpushConfigRoundTripUsesPrivatePermissions(t *testing.T) {
 		t.Fatalf("exit code = %d, stderr: %s", code, stderr)
 	}
 
-	path := filepath.Join(configRoot, "cu", "psst.json")
+	path := filepath.Join(configRoot, "cu", "config.yml")
 	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)
@@ -112,16 +114,16 @@ func TestPwpushConfigRoundTripUsesPrivatePermissions(t *testing.T) {
 	if got, want := info.Mode().Perm(), os.FileMode(0o600); got != want {
 		t.Errorf("config permissions = %o, want %o", got, want)
 	}
-	var stored pwpushConfig
+	var stored cuConfig
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := json.Unmarshal(data, &stored); err != nil {
+	if err := yaml.Unmarshal(data, &stored); err != nil {
 		t.Fatal(err)
 	}
-	if want := (pwpushConfig{Token: "token-for-local-test", Source: "https://pwpush.example", Email: "user@example.test"}); stored != want {
-		t.Errorf("stored config = %+v, want %+v", stored, want)
+	if want := (pwpushConfig{Token: "token-for-local-test", Source: "https://pwpush.example", Email: "user@example.test"}); stored.Psst != want {
+		t.Errorf("stored config = %+v, want %+v", stored.Psst, want)
 	}
 	if !strings.Contains(stderr, "Saved auth config to "+path) {
 		t.Errorf("stderr = %q, want saved path", stderr)
@@ -160,11 +162,11 @@ func TestPwpushConfigLoadErrorsAndAuthHeaders(t *testing.T) {
 		t.Errorf("missing config error = %v, want configuration guidance", err)
 	}
 
-	path := pwpushConfigPath()
+	path := configPath()
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte(`{"token":`), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("psst: [not-a-map"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := loadPwpushConfig(); err == nil || !strings.Contains(err.Error(), "could not parse "+path) {

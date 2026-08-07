@@ -3,6 +3,7 @@ package awsx
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -36,16 +37,15 @@ func FederatedConsoleURL(ctx context.Context, cfg aws.Config, in FederationInput
 		return "", fmt.Errorf("could not resolve caller identity: %w", err)
 	}
 	arn := aws.ToString(identity.Arn)
-	username := arn[strings.LastIndex(arn, "/")+1:]
+	name := arn[strings.LastIndex(arn, "/")+1:]
 	// GetFederationToken caps the federated name at 32 characters.
-	name := username
 	if len(name) > 32 {
 		name = name[:32]
 	}
 
 	seconds := int32(in.Duration.Seconds())
 	ui.Info("Requesting federation token for '%s' (duration: %ds)...",
-		ui.Yellow.Render(username), seconds)
+		ui.Yellow.Render(name), seconds)
 
 	tokenInput := &sts.GetFederationTokenInput{
 		Name:            aws.String(name),
@@ -122,7 +122,7 @@ func fetchSigninToken(ctx context.Context, session string, seconds int32) (strin
 		return "", fmt.Errorf("could not parse federation response: %w", err)
 	}
 	if payload.SigninToken == "" {
-		return "", fmt.Errorf("federation response contained no SigninToken")
+		return "", errors.New("federation response contained no SigninToken")
 	}
 	return payload.SigninToken, nil
 }

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -40,11 +41,14 @@ Example:
 		RunE: func(_ *cobra.Command, args []string) error {
 			binary, err := exec.LookPath("task")
 			if err != nil {
-				return fmt.Errorf("task not found in PATH — install it from https://taskfile.dev")
+				return errors.New("task not found in PATH — install it from https://taskfile.dev")
 			}
 
 			argv := append([]string{"task", "-t", taskfile, "-d", directory}, args...)
-			return syscall.Exec(binary, argv, os.Environ())
+			if err := syscall.Exec(binary, argv, os.Environ()); err != nil {
+				return fmt.Errorf("could not exec %s: %w", binary, err)
+			}
+			return nil
 		},
 	}
 
@@ -60,16 +64,4 @@ Example:
 	cmd.Flags().StringVarP(&taskfile, "taskfile", "t", defaultTaskfile, "Taskfile to run.")
 	cmd.Flags().StringVarP(&directory, "directory", "d", cwd, "Directory to run tasks in.")
 	return cmd
-}
-
-// configHome is where cu keeps its own config: ~/.config/cu.
-func configHome() string {
-	if dir, err := os.UserConfigDir(); err == nil {
-		return filepath.Join(dir, "cu")
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ".config/cu"
-	}
-	return filepath.Join(home, ".config", "cu")
 }

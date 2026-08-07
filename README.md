@@ -1,70 +1,31 @@
 # ☁️ CloudUtil
 
-CLI `cu` is a wrapper for most common AWS and Azure cloud operations with interactive selection and beautiful output.
+`cu` browses and operates the things you already have credentials for — AWS, Azure
+Key Vault, HashiCorp Vault, Infisical, Kubernetes — by fuzzy-picking from a list
+and printing JSON. Plus a semantic config differ, format converters, Password
+Pusher and a Taskfile passthrough.
 
-[![Go 1.26+](https://img.shields.io/badge/go-1.26+-00ADD8.svg)](https://go.dev/dl/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![AWS](https://img.shields.io/badge/AWS-Cloud-orange.svg)](https://aws.amazon.com/)
-[![Azure](https://img.shields.io/badge/Azure-Cloud-blue.svg)](https://azure.microsoft.com/)
-[![Kubernetes](https://img.shields.io/badge/Kubernetes-Cloud-blue.svg)](https://kubernetes.io/)
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/Rishang/cloudutil/main/install.sh | bash
-```
-
-A single static binary — `fzf` is compiled in, so there is nothing else to install for interactive selection.
+One static binary with `fzf` compiled in, so there is nothing else to install for
+interactive selection. Status text goes to stderr and data to stdout, so every
+command pipes into `jq`.
 
 ## 📚 Table of Contents
 
-- [☁️ CloudUtil](#️-cloudutil)
-  - [📚 Table of Contents](#-table-of-contents)
-  - [✨ Features](#-features)
-  - [📦 Installation](#-installation)
-    - [Requirements](#requirements)
-    - [Shell Completion](#shell-completion)
-  - [🚀 Usage](#-usage)
-    - [Top-level commands](#top-level-commands)
-    - [AWS Operations](#aws-operations)
-      - [Console Login](#console-login)
-      - [SSM Parameter Management](#ssm-parameter-management)
-      - [SSM Instance Connections](#ssm-instance-connections)
-      - [Secrets Manager](#secrets-manager)
-      - [Decode Authorization Message](#decode-authorization-message)
-      - [Advanced AWS Usage](#advanced-aws-usage)
-        - [Custom Policy for Console Login](#custom-policy-for-console-login)
-        - [Environment Variables](#environment-variables)
-    - [Azure Operations (`az`)](#azure-operations-az)
-      - [Key Vault Secrets](#key-vault-secrets)
-    - [Kubernetes Operations](#kubernetes-operations)
-      - [Kubernetes Secrets](#kubernetes-secrets)
-      - [Kubernetes ConfigMaps](#kubernetes-configmaps)
-      - [Pod Logs](#pod-logs)
-      - [Kubernetes Context and Namespace Switching](#kubernetes-context-and-namespace-switching)
-    - [OS Utils](#os-utils)
-      - [Shell History](#shell-history)
-    - [Semantic Diff](#semantic-diff)
-    - [Taskfile Operations](#taskfile-operations)
-    - [Password Pusher Operations](#password-pusher-operations)
-  - [🎯 Interactive Selection](#-interactive-selection)
-  - [📋 Command Reference](#-command-reference)
-  - [🔧 Development](#-development)
-    - [Local Development](#local-development)
-    - [Layout](#layout)
-
-## ✨ Features
-
-- 🚀 **Interactive AWS Console Login** - Generate federated console URLs with a scoped IAM policy file
-- 🔐 **SSM Parameter Management** - Search and retrieve parameters with fuzzy finding
-- 📡 **SSM Instance Connections** - Interactive shell and port forwarding through Systems Manager, no SSH key or open port needed
-- 🔑 **Secrets Manager Integration** - Interactive secret browsing with JSON formatting
-- 🎯 **Fuzzy Selection** - Real `fzf`, compiled into the binary — no separate install, and your `$FZF_DEFAULT_OPTS` still apply
-- 🎨 **Beautiful Output** - Colored tables and diffs, with status on stderr so stdout stays pipeable
-- ⚡ **Profile & Region Support** - Seamless switching between AWS profiles and regions (where supported per command)
-- 🎛️ **Kubernetes Operations** - Interactive secrets and ConfigMaps browsing, pod log streaming with a live preview panel, and context/namespace switching via `kubectl`
-- 🧰 **OS Utils** - Shell history search
-- 🔍 **Semantic Diff** - Structural diff of JSON, YAML, TOML, and HCL/Terraform config files. Table or unified output, N-way comparison, smart env-pattern ignore, JMESPath filtering, and auto-detection of `cu_diff.yml`
-- 🗂️ **Taskfile Passthrough** - Run local Taskfile tasks via `cu task ...` with interactive terminal support
-- 🔐 **Password Pusher Integration** - Configure Password Pusher, share secrets, and generate strong passwords
+- [Installation](#-installation)
+- [Usage](#-usage)
+  - [AWS Operations](#aws-operations)
+  - [Azure Operations (`az`)](#azure-operations-az)
+  - [Secret Providers (`vault`)](#secret-providers-vault)
+  - [Kubernetes Operations](#kubernetes-operations)
+  - [OS Utils](#os-utils)
+  - [Semantic Diff](#semantic-diff)
+  - [Format Conversion](#format-conversion)
+  - [Taskfile Operations](#taskfile-operations)
+  - [Password Pusher Operations](#password-pusher-operations)
+- [Command Reference](#-command-reference)
+- [Development](#-development)
 
 ## 📦 Installation
 
@@ -95,11 +56,7 @@ Or grab a prebuilt binary for your platform from the
 [releases page](https://github.com/Rishang/cloudutil/releases) — Linux, macOS and
 Windows, amd64 and arm64.
 
-Build from source:
-
-```bash
-git clone https://github.com/Rishang/cloudutil.git && cd cloudutil && go build -o cu .
-```
+Or build from source — see [Development](#-development).
 
 ### Requirements
 
@@ -109,7 +66,7 @@ certainly already have:
 
 - [Only for AWS operations] AWS CLI configured with credentials (`cu aws ec2-ssm` also needs the [Session Manager plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html))
 - [Only for Azure operations] Azure CLI (`az login` must be run primarily)
-- [Only for Kubernetes operations] `kubectl` configured with access to your target cluster
+- [Only for Kubernetes operations] `kubectl` configured with access to your target cluster — or a pod with a mounted ServiceAccount, see [Running inside a pod](#running-inside-a-pod)
 - [Only for Taskfile operations] [Taskfile](https://taskfile.dev/) installed and configured
 - [Only for Password Pusher operations] [Password Pusher](https://pwpush.com/) configured
 
@@ -134,17 +91,17 @@ Then restart your shell. `cu completion --help` prints the same list.
 
 ### Top-level commands
 
-The main entrypoint is `cu`. Subcommands are wired in `internal/cli/root.go`:
-
-| Command | Source | Purpose |
-|--------|--------|---------|
-| `cu aws` | `internal/cli/aws.go` | AWS (login, SSM, Secrets Manager, decode message) |
-| `cu az` | `internal/cli/azure.go` | Azure Key Vault secrets |
-| `cu os` | `internal/cli/os.go` | Shell history search |
-| `cu k` | `internal/cli/k8s.go` | Kubernetes secrets, ConfigMaps, pod logs, context and namespace switch |
-| `cu diff` | `internal/cli/diff.go` | Semantic diff of JSON, YAML, TOML, and HCL config files |
-| `cu pwpush` | `internal/cli/pwpush.go` | Password Pusher |
-| `cu task` | `internal/cli/task.go` | Passthrough to the `task` binary |
+| Command | Purpose |
+|--------|---------|
+| `cu aws` | AWS: console login, SSM, Secrets Manager, decode message |
+| `cu az` | Azure Key Vault secrets |
+| `cu os` | Shell history search |
+| `cu k` | Kubernetes secrets, ConfigMaps, pod logs, pod exec, context and namespace switch |
+| `cu diff` | Semantic diff of JSON, YAML, TOML, and HCL config files |
+| `cu vault` | HashiCorp Vault and Infisical secrets |
+| `cu json2yaml`, `cu yaml2json` | Format conversion on stdin or a file |
+| `cu pwpush` | Password Pusher |
+| `cu task` | Passthrough to the `task` binary |
 
 ### AWS Operations
 
@@ -351,6 +308,120 @@ Value: super-secret-value
 `Description` carries the secret's Key Vault content type. As with AWS, a value
 that parses as a JSON object is printed as nested JSON instead of a raw string.
 
+### Secret Providers (`vault`)
+
+Unlike AWS and Azure, HashiCorp Vault and Infisical have no ambient credential
+chain, so connections come from `~/.config/cu/secret_providers.yml`. It is a list
+of profiles, each naming its `provider`, so one command browses both backends:
+
+```yaml
+- profile: prod
+  provider: vault
+  endpoint: https://vault.example.com
+  credentials:
+    # Either a token, or a username and password for the userpass auth method.
+    token: hvs.CAESxxxx
+    username: ""
+    password: ""
+    namespace: default        # Vault Enterprise namespace; omit on OSS
+
+- profile: inf-prod
+  provider: infisical
+  endpoint: https://us.infisical.com   # or eu.infisical.com, or self-hosted
+  credentials:
+    # Either a machine identity access token (Token Auth), used as-is...
+    token: st.xxxxx
+    # ...or a Universal Auth pair, exchanged for a short-lived token at startup.
+    client_id: 8f1a...
+    client_secret: 4c2b...
+    namespace: my-org         # organizationSlug; only for sub-organizations
+```
+
+Keep it owner-readable only: `chmod 600 ~/.config/cu/secret_providers.yml`.
+
+Infisical's public API authenticates **machine identities only** — email and
+password are for the web dashboard and its own CLI, which use an SRP exchange
+plus MFA. Create an identity, add it to the projects it should reach, and use
+either of the two credential shapes above.
+
+```bash
+# Pick the profile interactively when the file has more than one
+cu vault secrets
+
+# -p is persistent, so it works before or after the subcommand
+cu vault -p prod secrets
+cu vault secrets --profile inf-prod
+export VAULT_PROFILE=prod    # default for -p
+```
+
+#### Scoping with `--path`
+
+`--path` is a prefix of the lines you see in fzf, so it narrows by whatever the
+provider's outermost container is. Every segment is resolved by the server, not
+filtered afterwards, so a narrow path also means fewer API calls:
+
+| `--path` | Vault | Infisical |
+|---|---|---|
+| *(omitted)* | every KV v2 mount | every project × environment |
+| `a` | mount `a` | project `a`, all environments |
+| `a/b` | path `b` in mount `a` | project `a`, environment `b` |
+| `a/b/c` | path `b/c` in mount `a` | folder `/c` in project `a`, environment `b` |
+
+An Infisical project matches on its slug, name, or id. A Vault mount whose own
+path contains a slash can only be addressed by its first segment — use `--filter`
+for the rest.
+
+`--filter` keeps only paths containing a substring, applied after listing.
+
+#### What gets listed
+
+Both providers list everything the credentials can see and skip what they cannot:
+a Vault subtree your policy denies, or an Infisical project your identity was
+never added to, is passed over rather than failing the run.
+
+- **Vault** discovers mounts via `sys/internal/ui/mounts` — the endpoint the Vault
+  UI itself uses, readable by any authenticated token, unlike `sys/mounts` which
+  needs a root-ish policy. KV **v1** mounts are named once in a warning and
+  skipped. The tree is walked breadth-first, one bounded batch of LIST calls per
+  level, so a wide mount does not serialise.
+- **Infisical** discovers projects and their environments via `/api/v1/projects`,
+  then makes one `recursive=true` call per project/environment pair — there is no
+  tree to walk. Requires an Infisical with the v4 secrets API.
+
+Selections print as one JSON object keyed by the path, and a value that is itself
+a JSON object is nested rather than escaped — same as `cu aws secrets`:
+
+```console
+$ cu vault -p prod secrets --path secret/team
+[*] Listing secrets from prod (vault)
+[*] Searching KV v2 mount(s): secret
+[*] Found 12 secret(s). Opening fzf for selection...
+{
+  "secret/team/backend/db": {
+    "password": "super-secret-value",
+    "username": "app"
+  }
+}
+```
+
+```console
+$ cu vault -p inf-prod secrets
+[*] Listing secrets from inf-prod (infisical)
+[*] Searching 6 project/environment pair(s)
+[*] Found 84 secret(s). Opening fzf for selection...
+{
+  "orders-service/production/db/DB_PASSWORD": "super-secret-value"
+}
+```
+
+A Vault line names a secret and prints all of its keys; an Infisical line names a
+single key, since that is the unit Infisical stores.
+
+On Infisical Cloud, listing with no `--path` costs one API call per
+project/environment pair against a limit of 120 secret reads a minute on the Free
+plan (300 on Pro). Concurrency is capped at 8; self-hosted instances are
+unlimited.
+
 ### Kubernetes Operations
 
 Browse Kubernetes resources interactively using `fzf`. Selected resources are printed as JSON in the terminal.
@@ -475,6 +546,35 @@ it came from:
 [pod/api-7d9f-abc/envoy]  [info] listener manager: all dependencies initialized
 ```
 
+#### Pod Exec
+
+Fuzzy-pick a pod and run something in it. Same picker and same preview panel as
+`cu k logs`, so you can land in the pod that is actually misbehaving.
+
+```bash
+# Interactive shell in a pod in the current namespace
+cu k exec
+
+# A different shell, in a named namespace
+cu k exec -n prod -- bash
+
+# One command, non-interactively — exits with the command's own status
+cu k exec -A -- cat /etc/hosts
+```
+
+| Flag | Meaning |
+|------|---------|
+| `-n`, `--namespace` | Namespace to search (default: the current context's) |
+| `-A`, `--all-namespaces` | Search every namespace |
+| `-c`, `--container` | Container to exec into; prompted for when the pod has several |
+
+The default command is `sh`, not `bash` — it exists in alpine and other minimal
+images where `bash` does not. Anything after `--` replaces it, keeping its own
+flags.
+
+The TTY is requested only when your stdin is one, so `echo data | cu k exec -- tee
+/tmp/x` pipes cleanly instead of being mangled by terminal processing.
+
 #### Kubernetes Context and Namespace Switching
 
 `ctx` is a `kubectx` equivalent and `ns` a `kubens` one.
@@ -496,9 +596,40 @@ Notes:
 - `ctx` applies the choice with `kubectl config use-context`; `ns` uses `kubectl config set-context --current --namespace`. kubectl's confirmation goes to stderr.
 - Neither validates a name passed as an argument — kubectl accepts any string for `--namespace`, so a typo sets a namespace that does not exist.
 
-### OS Utils
+The active context and namespace are highlighted in green in the fzf list, so
+`cu k ctx` doubles as "which cluster am I on?". Under `NO_COLOR` or a dumb
+terminal the active entry is suffixed with `(current)` instead.
 
-Utilities for local/dev workflows and config validation tasks.
+#### Running inside a pod
+
+`cu k` drives `kubectl`, and `kubectl` — unlike the client libraries — has **no
+in-cluster fallback**: given no kubeconfig it fails rather than reading the
+ServiceAccount token every pod already has mounted.
+
+So `cu` supplies one. When all of the following hold, it writes a kubeconfig to
+`$TMPDIR/cu-in-cluster.kubeconfig` and runs `kubectl` against it:
+
+- `$KUBERNETES_SERVICE_HOST` is set (i.e. running in a pod)
+- `$KUBECONFIG` is unset and `~/.kube/config` does not exist
+- `/var/run/secrets/kubernetes.io/serviceaccount/token` exists
+
+Any kubeconfig you provide yourself always wins — it was put there on purpose.
+
+The generated config references the token **by path**, never by value, so no
+credential is copied anywhere, nothing lands in `ps` output, and `kubectl`
+re-reads the file as the kubelet rotates it. The pod's own namespace becomes the
+default, since that is what its RBAC most likely covers.
+
+What that means per command, with a namespace-scoped Role:
+
+| Command | In-pod behaviour |
+|---|---|
+| `cu k secrets` / `configmaps` / `logs` | Work within the Role's namespace. Use `-n <ns>`; `-A` issues a cluster-wide list and fails with Forbidden |
+| `cu k exec` | Also needs `create` on `pods/exec`, which `get`/`list` on pods does not imply |
+| `cu k ns` | Needs cluster-wide `list namespaces` — fails unless the Role grants it |
+| `cu k ctx` | Lists the single `in-cluster` context |
+
+### OS Utils
 
 #### Shell History
 
@@ -660,6 +791,17 @@ cu diff --print-schema | llm "Generate a cu_diff.yml for these helm values files
   with ignore_patterns: qa,prod"
 ```
 
+### Format Conversion
+
+```bash
+cat file.json | cu json2yaml
+cu yaml2json -f manifest.yaml
+```
+
+Both read stdin or `-f <file>` and write to stdout. `yaml2json` emits one JSON
+object per line for a multi-document (`---`) file: JSON has no multi-document
+form, and dropping every document but the first would be silent data loss.
+
 ### Taskfile Operations
 
 Run [Taskfile](https://taskfile.dev/) tasks through CloudUtil. `cu task` replaces the current process with `task`, forwarding extra arguments for full interactive TTY behavior.
@@ -709,16 +851,10 @@ Notes:
 
 ## 🎯 Interactive Selection
 
-All commands use `fzf` for interactive selection, providing:
-
-- **Fuzzy matching** - Type partial names to filter
-- **Multi-select** - Use `Tab` to select multiple items
-- **Real-time filtering** - Instant results as you type
-- **Keyboard shortcuts** - Standard fzf navigation
-
 `fzf` is the real thing, linked into `cu` rather than shelled out to, so there is
-no separate install and no `fzf: command not found`. Your `$FZF_DEFAULT_OPTS`
-and `$FZF_DEFAULT_OPTS_FILE` are honored exactly as usual.
+no separate install and no `fzf: command not found`. Every keybinding is the one
+you already know, `Tab` multi-selects where a command accepts more than one item,
+and `$FZF_DEFAULT_OPTS` / `$FZF_DEFAULT_OPTS_FILE` are honored as usual.
 
 ## 📋 Command Reference
 
@@ -727,8 +863,10 @@ and `$FZF_DEFAULT_OPTS_FILE` are honored exactly as usual.
 | `cu aws` | `login`, `ssm-parameters`, `ec2-ssm`, `secrets`, `decode-message` |
 | `cu az` | `secrets` |
 | `cu os` | `history` |
-| `cu k` | `secrets`, `configmaps`, `logs`, `ctx`, `ns` |
+| `cu k` | `secrets`, `configmaps`, `logs`, `exec`, `ctx`, `ns` |
 | `cu diff` | `-f <a> -f <b>`, `--config <config.yaml>` |
+| `cu vault` | `secrets` |
+| *(top level)* | `json2yaml`, `yaml2json`, `completion` |
 | `cu pwpush` | `config`, `send`, `list-active`, `pwgen` |
 | `cu task` | forwards to `task -t <taskfile> -d <dir> ...` |
 
@@ -736,49 +874,19 @@ Run `cu --help` and `cu <group> --help` for live usage.
 
 ## 🔧 Development
 
-### Local Development
+Build through the Taskfile — it stamps the version metadata the release build
+does, which a bare `go build` leaves empty:
 
 ```bash
-git clone https://github.com/Rishang/cloudutil.git
-cd cloudutil
+git clone https://github.com/Rishang/cloudutil.git && cd cloudutil
 
-# Build and run
-go build -o cu .
-./cu --help
-
-# Or run without building
-go run . --help
-
-# Tests, vet and formatting
+task build    # -> dist/cu
 task test     # go test ./... with the race detector
 task lint     # gofmt + go vet
-task build    # build the cu binary
 task release  # local goreleaser snapshot into dist/
 ```
 
-`task --list-all` shows the rest.
+`task --list-all` shows the rest. [AGENTS.md](AGENTS.md) has the code layout and
+conventions.
 
-### Layout
-
-```
-main.go              entrypoint and version stamping
-internal/cli/        one file per command group, cobra wiring
-internal/diff/       loaders, diff engine, filters, renderer, cu_diff.yml schema
-internal/awsx/       AWS SDK calls
-internal/kube/       kubectl invocations
-internal/pick/       fzf, embedded via its Input/Output channels
-internal/ui/         styles, tables, rules; stderr for status, stdout for data
-tests/assets/        fixtures shared by the Go tests
-_archive/            the Python implementation cu replaced; inert, see its README
-```
-
----
-
-<div align="center">
-  <p>Made with ❤️ for the Cloud community</p>
-  <p>
-    <a href="https://github.com/Rishang/cloudutil/issues">Report Bug</a>
-    ·
-    <a href="https://github.com/Rishang/cloudutil/issues">Request Feature</a>
-  </p>
-</div>
+Bugs and feature requests: [issues](https://github.com/Rishang/cloudutil/issues).

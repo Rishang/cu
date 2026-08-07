@@ -1,10 +1,10 @@
 package cli
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -33,7 +33,7 @@ func loadPwpushConfig() (*pwpushConfig, error) {
 	data, err := os.ReadFile(pwpushConfigPath())
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("no configuration found — run 'cu pwpush config' first")
+			return nil, errors.New("no configuration found — run 'cu pwpush config' first")
 		}
 		return nil, err
 	}
@@ -209,7 +209,7 @@ func newPwpushSendCommand() *cobra.Command {
 				}
 				payload = strings.TrimSpace(string(content))
 			default:
-				edited, err := captureFromEditor("payload.txt", "")
+				edited, err := captureFromEditor("payload.txt")
 				if err != nil {
 					return err
 				}
@@ -220,12 +220,16 @@ func newPwpushSendCommand() *cobra.Command {
 				return exitWith(1)
 			}
 
+			deletableByViewer := 0
+			if deletable {
+				deletableByViewer = 1
+			}
 			password := map[string]any{
 				"payload":               payload,
 				"expire_after_days":     days,
 				"expire_after_views":    views,
 				"retrievable_by_viewer": 1,
-				"deletable_by_viewer":   boolToInt(deletable),
+				"deletable_by_viewer":   deletableByViewer,
 				"kind":                  kind,
 			}
 			if note != "" {
@@ -320,8 +324,7 @@ func newPwgenCommand() *cobra.Command {
 
 			password := make([]byte, length)
 			for i := range password {
-				// Rejection-free uniform pick from a crypto source, matching
-				// Python's secrets.choice.
+				// Unbiased pick from a crypto source, matching secrets.choice.
 				n, err := rand.Int(rand.Reader, big.NewInt(int64(len(chars))))
 				if err != nil {
 					return err
@@ -344,41 +347,5 @@ func newPwgenCommand() *cobra.Command {
 
 // pwpushRequest performs an authenticated API call and returns the response body.
 func pwpushRequest(ctx context.Context, method string, cfg *pwpushConfig, path string, body []byte) ([]byte, error) {
-	var reader io.Reader
-	if body != nil {
-		reader = bytes.NewReader(body)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, method, cfg.Source+path, reader)
-	if err != nil {
-		return nil, err
-	}
-	for key, value := range cfg.headers() {
-		req.Header.Set(key, value)
-	}
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	content, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return nil, fmt.Errorf("error %d: %s", resp.StatusCode, strings.TrimSpace(string(content)))
-	}
-	return content, nil
-}
-
-func boolToInt(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
+	return apiRequest(ctx, method, cfg.Source+path, cfg.headers(), body)
 }

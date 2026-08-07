@@ -18,9 +18,8 @@ import (
 
 func newOSCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "os",
-		Short:   "OS-related utilities",
-		Aliases: []string{"os-utils"},
+		Use:   "os",
+		Short: "OS-related utilities",
 	}
 	cmd.AddCommand(newHistoryCommand())
 	return cmd
@@ -75,8 +74,7 @@ func newHistoryCommand() *cobra.Command {
 	}
 }
 
-// readHistory returns unique, sorted history entries — matching the
-// `sort -u` the shell pipeline used before.
+// readHistory returns unique, sorted history entries.
 func readHistory(path string) ([]string, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -98,7 +96,7 @@ func readHistory(path string) ([]string, error) {
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("reading %s: %w", path, err)
 	}
 	return slices.Sorted(maps.Keys(unique)), nil
 }

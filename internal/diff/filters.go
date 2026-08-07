@@ -138,7 +138,7 @@ func prefixFilter(entries []Entry, prefix string) []Entry {
 	return out
 }
 
-// SortByPath orders entries by their rendered path, for stable output.
+// sortByPath orders entries by their rendered path, for stable output.
 func sortByPath(entries []Entry) []Entry {
 	out := slices.Clone(entries)
 	slices.SortStableFunc(out, func(a, b Entry) int {

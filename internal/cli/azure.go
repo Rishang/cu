@@ -82,8 +82,7 @@ func newAzureSecretsCommand() *cobra.Command {
 			if output == "json" {
 				return ui.PrintJSON(secrets)
 			}
-			printAzureSecretsText(secrets)
-			return nil
+			return printAzureSecretsText(secrets)
 		},
 	}
 
@@ -101,7 +100,11 @@ func newKeyVaultClient(vault string) (*azsecrets.Client, error) {
 		return nil, fmt.Errorf("could not resolve Azure credentials: %w", err)
 	}
 	url := fmt.Sprintf("https://%s.vault.azure.net/", vault)
-	return azsecrets.NewClient(url, credential, nil)
+	client, err := azsecrets.NewClient(url, credential, nil)
+	if err != nil {
+		return nil, fmt.Errorf("could not create a Key Vault client for %q: %w", vault, err)
+	}
+	return client, nil
 }
 
 func listKeyVaultSecrets(ctx context.Context, client *azsecrets.Client, nameFilter string) ([]string, error) {
@@ -145,7 +148,9 @@ func getKeyVaultSecret(ctx context.Context, client *azsecrets.Client, name strin
 	return secret, nil
 }
 
-func printAzureSecretsText(secrets []azureSecret) {
+// printAzureSecretsText renders each secret as a labelled block. Description
+// carries the Key Vault content type.
+func printAzureSecretsText(secrets []azureSecret) error {
 	for _, secret := range secrets {
 		ui.Printf("Name: '%s'", secret.Name)
 		if secret.Description != "" {
@@ -155,18 +160,17 @@ func printAzureSecretsText(secrets []azureSecret) {
 			ui.Printf("ID: '%s'", secret.ID)
 		}
 
-		// decodeSecretValue hands back the raw string unless the value is a
-		// JSON object, in which case it is printed as nested JSON.
 		switch parsed := decodeSecretValue(secret.Value).(type) {
 		case string:
 			fmt.Fprintf(ui.Out, "Value: %s\n", parsed)
 		default:
 			ui.Print("Value (JSON):")
 			if err := ui.PrintJSON(parsed); err != nil {
-				return
+				return err
 			}
 		}
 		ui.Rule("", ui.Dim)
 		ui.Print("")
 	}
+	return nil
 }

@@ -28,10 +28,11 @@ type Parameter struct {
 // ListParameters returns every parameter name under prefix.
 func ListParameters(ctx context.Context, cfg aws.Config, prefix string) ([]string, error) {
 	client := ssm.NewFromConfig(cfg)
+	// No WithDecryption: only names are used here, and decrypting every
+	// SecureString on the path would need kms:Decrypt just to list.
 	paginator := ssm.NewGetParametersByPathPaginator(client, &ssm.GetParametersByPathInput{
-		Path:           aws.String(prefix),
-		Recursive:      aws.Bool(true),
-		WithDecryption: aws.Bool(true),
+		Path:      aws.String(prefix),
+		Recursive: aws.Bool(true),
 	})
 
 	var names []string
@@ -72,8 +73,8 @@ type Instance struct {
 // Label is the fzf line for this instance.
 func (i Instance) Label() string { return i.ID + " | " + i.Name }
 
-// ListInstances returns running instances that carry an IAM instance profile,
-// which is what SSM needs to reach them.
+// ListInstances returns running, Name-tagged instances that carry an IAM
+// instance profile, which is what SSM needs to reach them.
 func ListInstances(ctx context.Context, cfg aws.Config) ([]Instance, error) {
 	client := ec2.NewFromConfig(cfg)
 	paginator := ec2.NewDescribeInstancesPaginator(client, &ec2.DescribeInstancesInput{

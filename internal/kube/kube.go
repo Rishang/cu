@@ -6,6 +6,7 @@
 package kube
 
 import (
+	"cmp"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -17,6 +18,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"golang.org/x/term"
 )
 
 // KeyRef identifies a single data key inside a Secret or ConfigMap.
@@ -31,10 +34,18 @@ func (k KeyRef) Display() string {
 	return fmt.Sprintf("%s/%s/%s", k.Namespace, k.Name, k.Key)
 }
 
+// kubectl builds a kubectl command carrying the environment it should run with,
+// which is the ambient one everywhere except inside a pod with no kubeconfig.
+func kubectl(args ...string) *exec.Cmd {
+	cmd := exec.Command("kubectl", args...)
+	cmd.Env = kubectlEnv()
+	return cmd
+}
+
 // run executes kubectl and returns its stdout, turning a failure into an error
 // carrying kubectl's own message.
 func run(args ...string) ([]byte, error) {
-	out, err := exec.Command("kubectl", args...).Output()
+	out, err := kubectl(args...).Output()
 	if err == nil {
 		return out, nil
 	}
@@ -47,7 +58,7 @@ func run(args ...string) ([]byte, error) {
 		}
 		return nil, fmt.Errorf("kubectl %s failed: %s", strings.Join(args, " "), detail)
 	}
-	if _, lookErr := exec.LookPath("kubectl"); lookErr != nil {
+	if errors.Is(err, exec.ErrNotFound) {
 		return nil, fmt.Errorf("kubectl not found in PATH")
 	}
 	return nil, fmt.Errorf("kubectl %s failed: %w", strings.Join(args, " "), err)
@@ -103,14 +114,38 @@ func ListContexts() ([]string, error) {
 	return runLines("config", "get-contexts", "-o", "name")
 }
 
+// configValue runs a read-only kubectl config query. A failure — no kubeconfig,
+// nothing selected — reads as "unset" rather than an error: callers only use
+// these to mark the active entry in a list.
+func configValue(args ...string) string {
+	out, err := run(args...)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// CurrentContext returns the context kubectl would act on.
+func CurrentContext() string { return configValue("config", "current-context") }
+
+// CurrentNamespace returns the current context's default namespace, which is
+// what a bare kubectl get would search. An unset one falls back to default,
+// just as kubectl does.
+func CurrentNamespace() string {
+	return cmp.Or(configValue("config", "view", "--minify", "-o", "jsonpath={..namespace}"), "default")
+}
+
 // ListNamespaces returns every namespace name. The API returns them sorted and
 // names are unique, so there is nothing to sort or dedupe here.
 func ListNamespaces() ([]string, error) {
 	names, err := runLines("get", "namespaces", "-o", "name")
+	if err != nil {
+		return nil, err
+	}
 	for i, name := range names {
 		names[i] = strings.TrimPrefix(name, "namespace/")
 	}
-	return names, err
+	return names, nil
 }
 
 // ListSecretKeys returns one entry per Secret data/stringData key.
@@ -134,9 +169,9 @@ func scopeArgs(args []string, allNamespaces bool, namespace string) []string {
 	return args
 }
 
-// keyedItem covers Secrets and ConfigMaps alike. All three data fields are
-// string-keyed maps and none of them collide — a Secret carries data and
-// stringData, a ConfigMap data and binaryData — so listing can just union them.
+// keyedItem covers Secrets and ConfigMaps alike: a Secret carries data and
+// stringData, a ConfigMap data and binaryData. Listing unions the three, and
+// deduplicates because a key can appear in more than one of them.
 type keyedItem struct {
 	Metadata   objectMeta        `json:"metadata"`
 	Data       map[string]string `json:"data"`
@@ -288,7 +323,7 @@ func StreamLogs(pod Pod, follow bool, tail int, w io.Writer) error {
 		args = append(args, "--prefix")
 	}
 
-	cmd := exec.Command("kubectl", args...)
+	cmd := kubectl(args...)
 	cmd.Stdout = w
 	cmd.Stderr = os.Stderr // kubectl explains its own failures
 	if err := cmd.Run(); err != nil {
@@ -297,8 +332,31 @@ func StreamLogs(pod Pod, follow bool, tail int, w io.Writer) error {
 	return nil
 }
 
-// UseContext switches the current kubeconfig context. kubectl's confirmation
-// goes to stderr, keeping stdout free for data.
+// Exec runs a command in a pod with the process's standard streams attached.
+func Exec(pod Pod, container string, command []string) error {
+	// -t only when stdin really is a terminal; otherwise kubectl warns and
+	// drops it, and piped input would arrive mangled by tty processing.
+	args := execArgs(pod, container, command, term.IsTerminal(int(os.Stdin.Fd())))
+
+	cmd := kubectl(args...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	return cmd.Run()
+}
+
+// execArgs builds the kubectl exec argv.
+func execArgs(pod Pod, container string, command []string, tty bool) []string {
+	args := []string{"exec", "-i"}
+	if tty {
+		args = append(args, "-t")
+	}
+	if container != "" {
+		args = append(args, "-c", container)
+	}
+	args = append(args, "-n", pod.Namespace, pod.Name, "--")
+	return append(args, command...)
+}
+
+// UseContext switches the current kubeconfig context.
 func UseContext(name string) error {
 	return configure("config", "use-context", name)
 }
@@ -308,6 +366,8 @@ func UseNamespace(name string) error {
 	return configure("config", "set-context", "--current", "--namespace", name)
 }
 
+// configure runs a kubectl config subcommand, relaying kubectl's confirmation
+// to stderr so stdout stays free for data.
 func configure(args ...string) error {
 	out, err := run(args...)
 	if len(out) > 0 {

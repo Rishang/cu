@@ -56,11 +56,11 @@ func TestFZFArgs(t *testing.T) {
 		opts Options
 		want []string
 	}{
-		{"bare", Options{}, []string{"--exact"}},
+		{"bare", Options{}, []string{"--exact", "--ansi"}},
 		{"multi and prompt", Options{Multi: true, Prompt: "pod> "},
-			[]string{"--exact", "--multi", "--prompt=pod> "}},
+			[]string{"--exact", "--ansi", "--multi", "--prompt=pod> "}},
 		{"preview brings its own window and toggle", Options{Preview: "echo {}"},
-			[]string{"--exact", "--preview=echo {}",
+			[]string{"--exact", "--ansi", "--preview=echo {}",
 				"--preview-window=right,50%,wrap", "--preview-wrap-sign=  ",
 				"--bind=ctrl-o:toggle-preview",
 				"--bind=ctrl-]:change-preview-window(right,75%|right,25%|right,50%)"}},

@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -130,9 +131,113 @@ func TestStreamLogsReportsFailure(t *testing.T) {
 	}
 }
 
+func TestExecArgs(t *testing.T) {
+	pod := Pod{Namespace: "prod", Name: "api-1"}
+
+	tests := []struct {
+		name      string
+		container string
+		command   []string
+		tty       bool
+		want      []string
+	}{
+		{
+			name:    "interactive shell",
+			command: []string{"sh"},
+			tty:     true,
+			want:    []string{"exec", "-i", "-t", "-n", "prod", "api-1", "--", "sh"},
+		},
+		{
+			// Piped input must not get -t: kubectl would drop it with a warning
+			// and tty processing would mangle the stream.
+			name:    "piped input drops the tty",
+			command: []string{"cat"},
+			want:    []string{"exec", "-i", "-n", "prod", "api-1", "--", "cat"},
+		},
+		{
+			// The container's own flags have to land after --, not be eaten by
+			// kubectl.
+			name:      "container and command flags",
+			container: "envoy",
+			command:   []string{"ls", "-la"},
+			tty:       true,
+			want: []string{"exec", "-i", "-t", "-c", "envoy",
+				"-n", "prod", "api-1", "--", "ls", "-la"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := execArgs(pod, tt.container, tt.command, tt.tty)
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("execArgs() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestPodDisplay(t *testing.T) {
 	pod := Pod{Namespace: "prod", Name: "api-1", Phase: "CrashLoopBackOff"}
 	if got, want := pod.Display(), "prod/api-1 (CrashLoopBackOff)"; got != want {
 		t.Errorf("Display() = %q, want %q", got, want)
+	}
+}
+
+// TestCurrentContextAndNamespace runs the real kubectl against a throwaway
+// kubeconfig: `kubectl config` needs no cluster, so this checks the actual
+// jsonpath and output handling rather than a stub's idea of them.
+func TestCurrentContextAndNamespace(t *testing.T) {
+	if _, err := exec.LookPath("kubectl"); err != nil {
+		t.Skip("kubectl not available")
+	}
+
+	config := filepath.Join(t.TempDir(), "config")
+	if err := os.WriteFile(config, []byte(`apiVersion: v1
+kind: Config
+current-context: prod
+clusters:
+- name: c1
+  cluster: {server: https://one.invalid}
+contexts:
+- name: prod
+  context: {cluster: c1, user: u1, namespace: payments}
+- name: staging
+  context: {cluster: c1, user: u1}
+users:
+- name: u1
+  user: {}
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KUBECONFIG", config)
+
+	if got := CurrentContext(); got != "prod" {
+		t.Errorf("CurrentContext() = %q, want prod", got)
+	}
+	if got := CurrentNamespace(); got != "payments" {
+		t.Errorf("CurrentNamespace() = %q, want payments", got)
+	}
+
+	contexts, err := ListContexts()
+	if err != nil {
+		t.Fatalf("ListContexts: %v", err)
+	}
+	if len(contexts) != 2 || contexts[0] != "prod" || contexts[1] != "staging" {
+		t.Fatalf("ListContexts() = %v, want [prod staging]", contexts)
+	}
+
+	// A context with no namespace falls back to what kubectl would use.
+	if err := UseContext("staging"); err != nil {
+		t.Fatalf("UseContext: %v", err)
+	}
+	if got := CurrentNamespace(); got != "default" {
+		t.Errorf("CurrentNamespace() with none set = %q, want default", got)
+	}
+
+	// No current-context at all is empty, not an error: the caller only marks
+	// a list with it.
+	t.Setenv("KUBECONFIG", filepath.Join(t.TempDir(), "missing"))
+	if got := CurrentContext(); got != "" {
+		t.Errorf("CurrentContext() with no kubeconfig = %q, want empty", got)
 	}
 }

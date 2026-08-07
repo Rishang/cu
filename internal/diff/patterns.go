@@ -10,7 +10,7 @@ import (
 // patternSet holds ignore_patterns tokens as case-insensitive literal matchers.
 type patternSet []*regexp.Regexp
 
-// CompilePatterns splits comma-separated tokens and compiles each as a
+// compilePatterns splits comma-separated tokens and compiles each as a
 // case-insensitive literal. Word boundaries are enforced at match time rather
 // than in the pattern: RE2 has no lookaround, so `(?<![A-Za-z0-9])` from the
 // Python version cannot be expressed here.
@@ -28,7 +28,7 @@ func compilePatterns(patterns []string) patternSet {
 	return compiled
 }
 
-// StripAll removes every configured token from s, one pattern at a time.
+// stripAll removes every configured token from s, one pattern at a time.
 func stripAll(c patternSet, s string) string {
 	for _, re := range c {
 		s = stripBounded(re, s)
@@ -36,7 +36,7 @@ func stripAll(c patternSet, s string) string {
 	return s
 }
 
-// ValuesEqualAfterStripping reports whether both values are identical once the
+// valuesEqualAfterStripping reports whether both values are identical once the
 // configured tokens are removed. Absent values count as empty.
 //
 // ponytail: exact equality — the Python threshold was a hardcoded 1.0, and

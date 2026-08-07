@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -126,5 +127,93 @@ func TestSecretProvidersConfig(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "readable by other users") {
 		t.Errorf("stderr = %q, want a warning about the file mode", stderr.String())
+	}
+}
+
+// TestSecretProfileFromEnv covers the precedence rule: VAULT_<PROVIDER>_* beats
+// the file, and VAULT_PROVIDER alone replaces it.
+func TestSecretProfileFromEnv(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", home)
+	if err := os.MkdirAll(filepath.Join(home, "cu"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	doc := `
+- profile: prod
+  provider: vault
+  endpoint: https://file.example.com
+  credentials:
+    token: s.file
+    namespace: eng
+`
+	if err := os.WriteFile(secretProvidersPath(), []byte(doc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// No file needed: the environment names the provider and everything it takes.
+	t.Setenv("VAULT_PROVIDER", "infisical")
+	t.Setenv("VAULT_INFISICAL_ENDPOINT", "https://us.infisical.com")
+	t.Setenv("VAULT_INFISICAL_CLIENT_ID", "8f1a")
+	t.Setenv("VAULT_INFISICAL_CLIENT_SECRET", "4c2b")
+	got, err := resolveSecretProfile("")
+	if err != nil {
+		t.Fatalf("resolveSecretProfile(env-only): %v", err)
+	}
+	if got.Provider != "infisical" || got.Endpoint != "https://us.infisical.com" ||
+		got.Credentials.ClientID != "8f1a" || got.Credentials.ClientSecret != "4c2b" {
+		t.Fatalf("env-only profile = %+v; want the VAULT_INFISICAL_* values, not the file's", got)
+	}
+	// The other block's vars are inert, so a stale export cannot leak across.
+	t.Setenv("VAULT_HASHICORP_TOKEN", "s.wrong-block")
+	if got, _ := resolveSecretProfile(""); got.Credentials.Token != "" {
+		t.Errorf("token = %q; want empty — VAULT_HASHICORP_* must not reach an infisical profile",
+			got.Credentials.Token)
+	}
+
+	// A named profile that disagrees with VAULT_PROVIDER is refused rather than
+	// dialled with half of each block.
+	if _, err := resolveSecretProfile("prod"); err == nil {
+		t.Fatal("want an error for a hashicorp profile under VAULT_PROVIDER=infisical")
+	}
+
+	// Naming a profile brings the file back, with the environment overriding the
+	// fields it sets and leaving the rest (namespace) alone.
+	t.Setenv("VAULT_PROVIDER", "")
+	t.Setenv("VAULT_HASHICORP_TOKEN", "s.env")
+	t.Setenv("VAULT_HASHICORP_USERNAME", "ci")
+	got, err = resolveSecretProfile("prod")
+	if err != nil {
+		t.Fatalf("resolveSecretProfile(prod): %v", err)
+	}
+	if got.Provider != "hashicorp" || got.Credentials.Token != "s.env" ||
+		got.Credentials.Username != "ci" ||
+		got.Credentials.Namespace != "eng" || got.Endpoint != "https://file.example.com" {
+		t.Fatalf("overlaid profile = %+v; want the env token over the file's, everything else from the file", got)
+	}
+	// The profile name is not overlaid — it is how this profile was found.
+	t.Setenv("VAULT_HASHICORP_PROFILE", "elsewhere")
+	if got, _ := resolveSecretProfile("prod"); got.Profile != "prod" {
+		t.Errorf("profile = %q; want prod", got.Profile)
+	}
+}
+
+// TestEnvKeysCoverCredentials pins the tag-derived naming: every credential
+// field is reachable from the environment, so adding one to secretProvider
+// cannot silently leave it file-only.
+func TestEnvKeysCoverCredentials(t *testing.T) {
+	creds := reflect.TypeOf(secretProvider{}.Credentials)
+	for i := range creds.NumField() {
+		tag, _, _ := strings.Cut(creds.Field(i).Tag.Get("yaml"), ",")
+		if tag == "" {
+			t.Fatalf("%s has no yaml tag, so it has no environment variable either",
+				creds.Field(i).Name)
+		}
+		t.Setenv("VAULT_HASHICORP_"+strings.ToUpper(tag), "set")
+		overlaid := envOverlay(secretProvider{Provider: "vault"})
+		got := reflect.ValueOf(overlaid.Credentials).Field(i).String()
+		if got != "set" {
+			t.Errorf("credentials.%s = %q after VAULT_HASHICORP_%s=set; want it applied",
+				tag, got, strings.ToUpper(tag))
+		}
 	}
 }

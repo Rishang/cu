@@ -316,7 +316,7 @@ of profiles, each naming its `provider`, so one command browses both backends:
 
 ```yaml
 - profile: prod
-  provider: vault
+  provider: hashicorp        # "vault" still works, it was the old name
   endpoint: https://vault.example.com
   credentials:
     # Either a token, or a username and password for the userpass auth method.
@@ -353,6 +353,44 @@ cu vault -p prod secrets
 cu vault secrets --profile inf-prod
 export VAULT_PROFILE=prod    # default for -p
 ```
+
+#### Configuring from the environment
+
+Every field of a profile has an environment variable, named for the provider it
+belongs to. They win over the file, so CI can override one credential without
+rewriting the config:
+
+```bash
+export VAULT_PROVIDER=hashicorp        # hashicorp | infisical — selects the block below
+
+# Used when VAULT_PROVIDER=hashicorp
+export VAULT_HASHICORP_ENDPOINT=https://vault.example.com
+export VAULT_HASHICORP_TOKEN=hvs.CAESxxxx
+export VAULT_HASHICORP_USERNAME=       # or userpass instead of a token
+export VAULT_HASHICORP_PASSWORD=
+export VAULT_HASHICORP_NAMESPACE=default
+
+# Used when VAULT_PROVIDER=infisical
+export VAULT_INFISICAL_ENDPOINT=https://us.infisical.com
+export VAULT_INFISICAL_TOKEN=st.xxxxx
+export VAULT_INFISICAL_CLIENT_ID=8f1a...
+export VAULT_INFISICAL_CLIENT_SECRET=4c2b...
+export VAULT_INFISICAL_NAMESPACE=my-org
+```
+
+Two traps worth knowing:
+
+- `VAULT_PROVIDER` alone is a whole connection, so with it set and no `--profile`
+  (or `VAULT_PROFILE`) `cu` never reads `secret_providers.yml` — it will not
+  prompt for a profile either. Name a profile and the environment goes back to
+  overriding only the fields it sets; the profile's own `provider` decides which
+  block is read, and a `VAULT_PROVIDER` that contradicts it is an error rather
+  than a silent half-and-half connection.
+- Only the selected provider's block is looked at. A leftover
+  `VAULT_HASHICORP_TOKEN` cannot leak into an Infisical connection.
+
+An empty export is the same as an unset one — it falls through to the file
+rather than blanking the field.
 
 #### Scoping with `--path`
 

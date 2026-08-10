@@ -325,9 +325,9 @@ vault:
       username: ""
       password: ""
       namespace: default        # Vault Enterprise namespace; omit on OSS
-      client_cert: ""           # optional: PEM client cert, for mTLS
-      client_key: ""            # optional: PEM key matching client_cert
-      ca_cert: ""               # optional: PEM bundle for a private CA
+      client_cert: ""           # optional: PEM client cert, e.g. /etc/vault/client.pem
+      client_key: ""            # optional: matching PEM key, e.g. /etc/vault/client-key.pem
+      ca_cert: ""               # optional: PEM CA bundle, e.g. /etc/vault/ca.pem
     bastion:                     # optional: reach a private endpoint via SSH
       host: bastion.example.com
       port: 22                   # optional, default 22

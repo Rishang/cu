@@ -47,6 +47,14 @@ type secretProvider struct {
 		ClientKey  string `yaml:"client_key"`
 		CACert     string `yaml:"ca_cert"`
 	} `yaml:"credentials"`
+	// Bastion routes the connection through an SSH jump host, for an
+	// endpoint that is only reachable from inside a private network.
+	Bastion struct {
+		Host string `yaml:"host"`
+		Port int    `yaml:"port"`
+		User string `yaml:"user"`
+		Key  string `yaml:"key"`
+	} `yaml:"bastion"`
 }
 
 // loadSecretProviders reads the "vault" profile list from config.yml.
@@ -346,17 +354,19 @@ func idleTransport() *http.Transport {
 	return t
 }
 
-// mtlsClient builds a dedicated http.Client when a profile's credentials
-// configure mTLS, since a client cert is per-profile and can't be shared
-// through the package-wide httpClient. Returns nil when none are set, so the
-// caller falls back to httpClient.
-func mtlsClient(p secretProvider) (*http.Client, error) {
+// httpClientFor builds a dedicated http.Client when a profile needs one: mTLS
+// credentials or a serverName override, neither of which the package-wide
+// httpClient can carry since both are per-profile. serverName is set when a
+// bastion tunnel has rewritten the endpoint's host to a local address, so TLS
+// still verifies against the certificate's real name. Returns nil for
+// neither, so the caller falls back to httpClient.
+func httpClientFor(p secretProvider, serverName string) (*http.Client, error) {
 	creds := p.Credentials
-	if creds.ClientCert == "" && creds.CACert == "" {
+	if creds.ClientCert == "" && creds.CACert == "" && serverName == "" {
 		return nil, nil
 	}
 
-	tlsConfig := &tls.Config{}
+	tlsConfig := &tls.Config{ServerName: serverName}
 	if creds.ClientCert != "" {
 		if creds.ClientKey == "" {
 			return nil, fmt.Errorf("profile %q sets client_cert without client_key", p.Profile)

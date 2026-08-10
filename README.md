@@ -325,9 +325,14 @@ vault:
       username: ""
       password: ""
       namespace: default        # Vault Enterprise namespace; omit on OSS
-      client_cert: /etc/vault/client.pem      # optional
-      client_key: /etc/vault/client-key.pem   # optional
-      ca_cert: /etc/vault/ca.pem              # optional
+      client_cert: ""           # optional: PEM client cert, for mTLS
+      client_key: ""            # optional: PEM key matching client_cert
+      ca_cert: ""               # optional: PEM bundle for a private CA
+    bastion:                     # optional: reach a private endpoint via SSH
+      host: bastion.example.com
+      port: 22                   # optional, default 22
+      user: ec2-user
+      key: ~/.ssh/id_rsa
 
   - profile: inf-prod
     provider: infisical
@@ -345,6 +350,12 @@ vault:
 they set up the HTTP client rather than anything provider-specific: a client
 cert without its key (or vice versa) is a config error, not a plaintext
 fallback.
+
+`bastion` opens an SSH tunnel to `endpoint`'s host through the named jump host
+before dialing it, for a Vault or Infisical instance that only has a private
+IP. It authenticates to the bastion with `key` alone — no ssh-agent, no
+password — and does not verify the bastion's host key, so that hop needs to
+already be a trusted network.
 
 Keep it owner-readable only: `chmod 600 ~/.config/cu/config.yml`.
 

@@ -199,9 +199,9 @@ vault:
 	}
 }
 
-// TestMTLSClient pins mtlsClient's contract: no cert/CA configured means "use
-// the shared httpClient", and a half-set or unreadable cert is an error
-// rather than a silently plaintext connection.
+// TestMTLSClient pins httpClientFor's mTLS contract: no cert/CA/serverName
+// configured means "use the shared httpClient", and a half-set or unreadable
+// cert is an error rather than a silently plaintext connection.
 func TestMTLSClient(t *testing.T) {
 	dir := t.TempDir()
 	certPath := filepath.Join(dir, "client.pem")
@@ -222,15 +222,15 @@ func TestMTLSClient(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			p := secretProvider{}
 			p.Credentials.ClientCert, p.Credentials.ClientKey, p.Credentials.CACert = tc.creds()
-			client, err := mtlsClient(p)
+			client, err := httpClientFor(p, "")
 			if tc.wantErr {
 				if err == nil {
-					t.Fatal("mtlsClient(): want error, got nil")
+					t.Fatal("httpClientFor(): want error, got nil")
 				}
 				return
 			}
 			if err != nil || client != nil {
-				t.Fatalf("mtlsClient() = %v, %v; want nil, nil", client, err)
+				t.Fatalf("httpClientFor() = %v, %v; want nil, nil", client, err)
 			}
 		})
 	}

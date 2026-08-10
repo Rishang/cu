@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"crypto/rand"
 	"encoding/json"
 	"errors"
@@ -111,7 +110,8 @@ func newPwpushListActiveCommand() *cobra.Command {
 				return err
 			}
 
-			body, err := pwpushRequest(cmd.Context(), http.MethodGet, cfg, "/p/active.json", nil)
+			body, err := apiRequest(cmd.Context(), httpClient, http.MethodGet,
+				cfg.Source+"/p/active.json", cfg.headers(), nil)
 			if err != nil {
 				return err
 			}
@@ -225,7 +225,8 @@ func newPwpushSendCommand() *cobra.Command {
 				return err
 			}
 
-			response, err := pwpushRequest(cmd.Context(), http.MethodPost, cfg, "/p.json", body)
+			response, err := apiRequest(cmd.Context(), httpClient, http.MethodPost,
+				cfg.Source+"/p.json", cfg.headers(), body)
 			if err != nil {
 				return err
 			}
@@ -266,11 +267,8 @@ func newPwpushSendCommand() *cobra.Command {
 
 func newPwgenCommand() *cobra.Command {
 	var (
-		length      int
-		noSymbols   bool
-		noUppercase bool
-		noLowercase bool
-		noDigits    bool
+		length    int
+		noSymbols bool
 	)
 
 	cmd := &cobra.Command{
@@ -279,28 +277,13 @@ func newPwgenCommand() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			const (
-				upper   = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-				lower   = "abcdefghijklmnopqrstuvwxyz"
-				digits  = "0123456789"
-				symbols = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
+				alphanumeric = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+				symbols      = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
 			)
 
-			var chars string
-			if !noUppercase {
-				chars += upper
-			}
-			if !noLowercase {
-				chars += lower
-			}
-			if !noDigits {
-				chars += digits
-			}
-			if !noSymbols {
-				chars += symbols
-			}
-			if chars == "" {
-				ui.Error("No character types selected.")
-				return exitWith(1)
+			chars := alphanumeric + symbols
+			if noSymbols {
+				chars = alphanumeric
 			}
 			if length < 1 {
 				ui.Error("--length must be at least 1.")
@@ -324,13 +307,5 @@ func newPwgenCommand() *cobra.Command {
 	flags := cmd.Flags()
 	flags.IntVarP(&length, "length", "l", 16, "Password length.")
 	flags.BoolVar(&noSymbols, "no-symbols", false, "Exclude symbols.")
-	flags.BoolVar(&noUppercase, "no-uppercase", false, "Exclude uppercase letters.")
-	flags.BoolVar(&noLowercase, "no-lowercase", false, "Exclude lowercase letters.")
-	flags.BoolVar(&noDigits, "no-digits", false, "Exclude digits.")
 	return cmd
-}
-
-// pwpushRequest performs an authenticated API call and returns the response body.
-func pwpushRequest(ctx context.Context, method string, cfg *pwpushConfig, path string, body []byte) ([]byte, error) {
-	return apiRequest(ctx, method, cfg.Source+path, cfg.headers(), body)
 }

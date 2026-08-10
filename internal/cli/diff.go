@@ -22,10 +22,8 @@ type diffFlags struct {
 	ignorePatterns []string
 	format         string
 	unified        bool
-	color          bool
 	noColor        bool
 	query          string
-	printSchema    bool
 }
 
 func newDiffCommand() *cobra.Command {
@@ -46,9 +44,8 @@ Common flags:
   --unified / -u             git-diff style output instead of table
   --ignore-key metadata      suppress paths containing 'metadata'
   --ignore-pattern dev       suppress values differing only by 'dev'
-  --format json              machine-readable JSON
-  -q spec.replicas           show only diffs under a path prefix
-  -q "[?kind=='changed']"    JMESPath filter on diff entries`,
+  --format json              machine-readable JSON, for piping into jq
+  -q spec.replicas           show only diffs under a path prefix`,
 		Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			return runDiff(f)
@@ -67,24 +64,15 @@ Common flags:
 		"Output format: unified, table, or json.")
 	flags.BoolVarP(&f.unified, "unified", "u", false,
 		"Shorthand for --format unified (git-diff style).")
-	flags.BoolVar(&f.color, "color", true, "Enable colored output.")
 	flags.BoolVar(&f.noColor, "no-color", false, "Disable colored output.")
 	flags.StringVarP(&f.query, "query", "q", "",
-		"Filter diff entries by path prefix or JMESPath expression, e.g. -q \"[?kind=='changed']\".")
-	flags.BoolVar(&f.printSchema, "print-schema", false,
-		"Print the cu_diff.yml JSON schema as YAML and exit. Useful for agents "+
-			"generating config files: pipe it to an LLM with your file list.")
+		"Show only diffs at or under this path prefix, e.g. -q spec.replicas.")
 
 	return cmd
 }
 
 func runDiff(f *diffFlags) error {
-	if f.printSchema {
-		fmt.Fprint(ui.Out, string(diff.SchemaYAML()))
-		return nil
-	}
-
-	if f.noColor || !f.color {
+	if f.noColor {
 		ui.SetColor(false)
 	}
 
@@ -245,15 +233,10 @@ func executeDiff(fileA, fileB string, rules diff.FilterRules, format diff.Format
 
 	kept, ignored := diff.Apply(diff.Compute(dataA, dataB), rules)
 
+	// Only what is rendered as a diff is filtered; the ignored list is a dim
+	// footer saying what the rules suppressed, not queryable output.
 	if query != "" {
-		if kept, err = diff.Query(kept, query); err != nil {
-			ui.Error("%v", err)
-			return 0, exitWith(1)
-		}
-		if ignored, err = diff.Query(ignored, query); err != nil {
-			ui.Error("%v", err)
-			return 0, exitWith(1)
-		}
+		kept = diff.Query(kept, query)
 	}
 
 	diff.Render(kept, diff.RenderOptions{
@@ -262,7 +245,6 @@ func executeDiff(fileA, fileB string, rules diff.FilterRules, format diff.Format
 		FileB:   filepath.Base(fileB),
 		BranchA: diff.GitBranch(fileA),
 		BranchB: diff.GitBranch(fileB),
-		HCL:     diff.IsHCL(fileA) && diff.IsHCL(fileB),
 		Ignored: ignored,
 	})
 	return len(kept), nil

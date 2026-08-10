@@ -2,14 +2,17 @@ package cli
 
 import (
 	"bytes"
+	"cmp"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,7 +40,22 @@ type secretProvider struct {
 		// Namespace is a Vault Enterprise namespace, or Infisical's
 		// organizationSlug — both name the tenant the credentials belong to.
 		Namespace string `yaml:"namespace"`
+		// ClientCert, ClientKey and CACert are all optional and enable mTLS:
+		// ClientCert/ClientKey are a PEM pair presented to the server, CACert
+		// a PEM bundle to verify the server against, for a private CA. Plain
+		// TLS (no client cert, system CA pool) works with none of them set.
+		ClientCert string `yaml:"client_cert"`
+		ClientKey  string `yaml:"client_key"`
+		CACert     string `yaml:"ca_cert"`
 	} `yaml:"credentials"`
+	// Bastion routes the connection through an SSH jump host, for an
+	// endpoint that is only reachable from inside a private network.
+	Bastion struct {
+		Host string `yaml:"host"`
+		Port int    `yaml:"port"`
+		User string `yaml:"user"`
+		Key  string `yaml:"key"`
+	} `yaml:"bastion"`
 }
 
 // loadSecretProviders reads the "vault" profile list from config.yml.
@@ -55,12 +73,11 @@ func loadSecretProviders() ([]secretProvider, error) {
 // resolveProfile picks the named profile, the only one, or asks.
 func resolveProfile(profiles []secretProvider, name string) (secretProvider, error) {
 	if name != "" {
-		for _, profile := range profiles {
-			if profile.Profile == name {
-				return profile, nil
-			}
+		i := slices.IndexFunc(profiles, func(p secretProvider) bool { return p.Profile == name })
+		if i < 0 {
+			return secretProvider{}, fmt.Errorf("no profile %q in %s", name, configPath())
 		}
-		return secretProvider{}, fmt.Errorf("no profile %q in %s", name, configPath())
+		return profiles[i], nil
 	}
 	if len(profiles) == 1 {
 		return profiles[0], nil
@@ -119,39 +136,48 @@ func canonicalProvider(name string) string {
 // invocation while the file is the standing default — that is what lets a
 // container or CI job override one credential without rewriting the config.
 //
-// Each key is the field's yaml tag, uppercased, so a field added to
-// secretProvider is settable from the environment without touching this code.
-func envOverlay(p secretProvider) secretProvider {
+// profile and provider are deliberately not overridable: they are how the
+// profile was chosen in the first place, so a VAULT_<PROVIDER>_PROVIDER could
+// only disagree with the prefix already in hand.
+//
+// The bastion keys are spelled BASTION_HOST and BASTION_USER rather than HOST
+// and USER: the jump host and the Vault server are one letter apart otherwise,
+// and _ENDPOINT already names the latter.
+func envOverlay(p secretProvider) (secretProvider, error) {
 	p.Provider = canonicalProvider(p.Provider)
 	if p.Provider == "" {
-		return p
+		return p, nil
 	}
-	applyEnv(reflect.ValueOf(&p).Elem(), "VAULT_"+strings.ToUpper(p.Provider)+"_")
-	return p
-}
+	prefix := "VAULT_" + strings.ToUpper(p.Provider) + "_"
+	env := func(key string) string { return os.Getenv(prefix + key) }
 
-// applyEnv sets each string field of v from prefix + its uppercased yaml tag,
-// flattening nested structs onto the same prefix so credentials.token reads
-// VAULT_<PROVIDER>_TOKEN. Empty and unset mean the same thing: fall through to
-// whatever the file had.
-func applyEnv(v reflect.Value, prefix string) {
-	t := v.Type()
-	for i := range t.NumField() {
-		tag, _, _ := strings.Cut(t.Field(i).Tag.Get("yaml"), ",")
-		field := v.Field(i)
-		switch {
-		case field.Kind() == reflect.Struct:
-			applyEnv(field, prefix)
-		// profile and provider are how the profile was chosen in the first
-		// place; letting a VAULT_<PROVIDER>_PROVIDER re-point it mid-overlay
-		// would just be a way to disagree with the prefix already in hand.
-		case tag == "" || tag == "profile" || tag == "provider":
-		case field.Kind() == reflect.String && field.CanSet():
-			if value := os.Getenv(prefix + strings.ToUpper(tag)); value != "" {
-				field.SetString(value)
-			}
+	p.Endpoint = cmp.Or(env("ENDPOINT"), p.Endpoint)
+
+	c := &p.Credentials
+	c.Token = cmp.Or(env("TOKEN"), c.Token)
+	c.Username = cmp.Or(env("USERNAME"), c.Username)
+	c.Password = cmp.Or(env("PASSWORD"), c.Password)
+	c.ClientID = cmp.Or(env("CLIENT_ID"), c.ClientID)
+	c.ClientSecret = cmp.Or(env("CLIENT_SECRET"), c.ClientSecret)
+	c.Namespace = cmp.Or(env("NAMESPACE"), c.Namespace)
+	c.ClientCert = cmp.Or(env("CLIENT_CERT"), c.ClientCert)
+	c.ClientKey = cmp.Or(env("CLIENT_KEY"), c.ClientKey)
+	c.CACert = cmp.Or(env("CA_CERT"), c.CACert)
+
+	b := &p.Bastion
+	b.Host = cmp.Or(env("BASTION_HOST"), b.Host)
+	b.User = cmp.Or(env("BASTION_USER"), b.User)
+	b.Key = cmp.Or(env("BASTION_KEY"), b.Key)
+	// A mistyped port has to be an error: falling back to 22 would dial the
+	// wrong place and report it as a connection failure.
+	if raw := env("BASTION_PORT"); raw != "" {
+		port, err := strconv.Atoi(raw)
+		if err != nil {
+			return secretProvider{}, fmt.Errorf("%sBASTION_PORT=%q is not a number", prefix, raw)
 		}
+		b.Port = port
 	}
+	return p, nil
 }
 
 // resolveSecretProfile picks the profile a command runs against. A bare
@@ -162,7 +188,7 @@ func applyEnv(v reflect.Value, prefix string) {
 func resolveSecretProfile(name string) (secretProvider, error) {
 	envProvider := canonicalProvider(os.Getenv("VAULT_PROVIDER"))
 	if name == "" && envProvider != "" {
-		return envOverlay(secretProvider{Profile: "env", Provider: envProvider}), nil
+		return envOverlay(secretProvider{Profile: "env", Provider: envProvider})
 	}
 	profiles, err := loadSecretProviders()
 	if err != nil {
@@ -180,7 +206,7 @@ func resolveSecretProfile(name string) (secretProvider, error) {
 			"profile %q is %s but $VAULT_PROVIDER is %s — unset one of them",
 			selected.Profile, selected.Provider, envProvider)
 	}
-	return envOverlay(selected), nil
+	return envOverlay(selected)
 }
 
 // newSecretStore dials the backend a profile names.
@@ -217,8 +243,9 @@ func newVaultCommand() *cobra.Command {
 			"--profile and more than one configured, fzf asks which.\n\n" +
 			"$VAULT_PROVIDER (hashicorp or infisical) configures a connection without the\n" +
 			"file at all, from VAULT_<PROVIDER>_ENDPOINT, _TOKEN, _USERNAME, _PASSWORD,\n" +
-			"_CLIENT_ID, _CLIENT_SECRET and _NAMESPACE. Those override the matching fields\n" +
-			"of a named profile too.",
+			"_CLIENT_ID, _CLIENT_SECRET, _NAMESPACE, the mTLS trio _CLIENT_CERT, _CLIENT_KEY\n" +
+			"and _CA_CERT, and _BASTION_HOST, _BASTION_PORT, _BASTION_USER, _BASTION_KEY.\n" +
+			"Those override the matching fields of a named profile too.",
 	}
 	// Persistent so both `cu vault -p x secrets` and `cu vault secrets -p x` work.
 	// The flag wins over VAULT_PROFILE, which wins over "ask if ambiguous".
@@ -337,10 +364,66 @@ func idleTransport() *http.Transport {
 	return t
 }
 
+// httpClientFor builds a dedicated http.Client when a profile needs one: mTLS
+// credentials or a serverName override, neither of which the package-wide
+// httpClient can carry since both are per-profile. serverName is set when a
+// bastion tunnel has rewritten the endpoint's host to a local address, so TLS
+// still verifies against the certificate's real name. Returns nil for
+// neither, so the caller falls back to httpClient.
+func httpClientFor(p secretProvider, serverName string) (*http.Client, error) {
+	creds := p.Credentials
+	if creds.ClientCert == "" && creds.CACert == "" && serverName == "" {
+		return nil, nil
+	}
+
+	tlsConfig := &tls.Config{ServerName: serverName}
+	if creds.ClientCert != "" {
+		if creds.ClientKey == "" {
+			return nil, fmt.Errorf("profile %q sets client_cert without client_key", p.Profile)
+		}
+		cert, err := tls.LoadX509KeyPair(creds.ClientCert, creds.ClientKey)
+		if err != nil {
+			return nil, fmt.Errorf("loading client_cert/client_key: %w", err)
+		}
+		tlsConfig.Certificates = []tls.Certificate{cert}
+	}
+	if creds.CACert != "" {
+		pem, err := os.ReadFile(creds.CACert)
+		if err != nil {
+			return nil, fmt.Errorf("reading ca_cert: %w", err)
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(pem) {
+			return nil, fmt.Errorf("ca_cert %q has no usable certificates", creds.CACert)
+		}
+		tlsConfig.RootCAs = pool
+	}
+
+	transport := idleTransport()
+	transport.TLSClientConfig = tlsConfig
+	return &http.Client{Transport: transport}, nil
+}
+
+// dialProfile resolves what a provider client needs before its first request:
+// the endpoint to talk to, which a bastion moves to a local address, and the
+// http.Client to talk with, which is nil unless mTLS or that rewritten host
+// needs one of its own.
+func dialProfile(ctx context.Context, p secretProvider) (endpoint string, client *http.Client, err error) {
+	endpoint, serverName, err := bastionEndpoint(ctx, p)
+	if err != nil {
+		return "", nil, err
+	}
+	if client, err = httpClientFor(p, serverName); err != nil {
+		return "", nil, err
+	}
+	return strings.TrimRight(endpoint, "/"), cmp.Or(client, httpClient), nil
+}
+
 // apiRequest performs a JSON API call and returns the response body. Both
 // backends talk plain REST, so they share one round-tripper; headers is what
-// distinguishes them.
-func apiRequest(ctx context.Context, method, url string, headers map[string]string, body []byte) ([]byte, error) {
+// distinguishes them. client is the package-wide httpClient for callers with
+// nothing special to say, or a profile's own when mTLS or a bastion needs one.
+func apiRequest(ctx context.Context, client *http.Client, method, url string, headers map[string]string, body []byte) ([]byte, error) {
 	// The client has no timeout of its own, so a black-holed endpoint would
 	// hang the command forever. Per call, since a walk makes many.
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
@@ -363,7 +446,7 @@ func apiRequest(ctx context.Context, method, url string, headers map[string]stri
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	resp, err := httpClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}

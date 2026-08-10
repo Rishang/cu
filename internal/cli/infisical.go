@@ -25,12 +25,19 @@ import (
 type infisicalClient struct {
 	endpoint string
 	token    string
+	// httpClient is the profile's own only when mTLS or a bastion needs one.
+	httpClient *http.Client
 }
 
 func newInfisicalClient(ctx context.Context, p secretProvider) (secretStore, error) {
+	endpoint, httpClient, err := dialProfile(ctx, p)
+	if err != nil {
+		return nil, err
+	}
 	client := &infisicalClient{
-		endpoint: strings.TrimRight(p.Endpoint, "/"),
-		token:    p.Credentials.Token,
+		endpoint:   endpoint,
+		token:      p.Credentials.Token,
+		httpClient: httpClient,
 	}
 	if client.token != "" {
 		return client, nil
@@ -217,5 +224,5 @@ func (c *infisicalClient) request(ctx context.Context, method, endpointPath stri
 	if c.token != "" {
 		headers["Authorization"] = "Bearer " + c.token
 	}
-	return apiRequest(ctx, method, c.endpoint+endpointPath, headers, body)
+	return apiRequest(ctx, c.httpClient, method, c.endpoint+endpointPath, headers, body)
 }

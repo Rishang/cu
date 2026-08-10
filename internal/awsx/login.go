@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -20,47 +21,38 @@ import (
 
 const federationEndpoint = "https://signin.aws.amazon.com/federation"
 
-// FederationInput describes a console sign-in request.
-type FederationInput struct {
-	Duration    time.Duration
-	Policy      json.RawMessage // optional inline policy to scope the session down
-	Destination string
-}
-
-// FederatedConsoleURL builds an AWS Management Console sign-in URL from the
-// current credentials using STS GetFederationToken.
-func FederatedConsoleURL(ctx context.Context, cfg aws.Config, in FederationInput) (string, error) {
+// FederatedConsoleURL builds an AWS Management Console sign-in URL for region
+// from the current credentials, using STS GetFederationToken. policy is an
+// optional inline policy scoping the session down.
+func FederatedConsoleURL(ctx context.Context, cfg aws.Config, region string,
+	duration time.Duration, policy json.RawMessage,
+) (string, error) {
 	client := sts.NewFromConfig(cfg)
 
 	identity, err := client.GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
 	if err != nil {
 		return "", fmt.Errorf("could not resolve caller identity: %w", err)
 	}
-	arn := aws.ToString(identity.Arn)
-	name := arn[strings.LastIndex(arn, "/")+1:]
 	// GetFederationToken caps the federated name at 32 characters.
-	if len(name) > 32 {
-		name = name[:32]
-	}
+	name := path.Base(aws.ToString(identity.Arn))
+	name = name[:min(len(name), 32)]
 
-	seconds := int32(in.Duration.Seconds())
-	ui.Info("Requesting federation token for '%s' (duration: %ds)...",
+	seconds := strconv.Itoa(int(duration.Seconds()))
+	ui.Info("Requesting federation token for '%s' (duration: %ss)...",
 		ui.Yellow.Render(name), seconds)
 
 	tokenInput := &sts.GetFederationTokenInput{
 		Name:            aws.String(name),
-		DurationSeconds: aws.Int32(seconds),
+		DurationSeconds: aws.Int32(int32(duration.Seconds())),
 	}
-	if len(in.Policy) > 0 {
-		tokenInput.Policy = aws.String(string(in.Policy))
-		ui.Info("Applying inline policy to the federated session.")
+	if len(policy) > 0 {
+		tokenInput.Policy = aws.String(string(policy))
 	}
 
 	token, err := client.GetFederationToken(ctx, tokenInput)
 	if err != nil {
 		return "", fmt.Errorf("could not get federation token: %w", err)
 	}
-	ui.Ok("Federation token received.")
 
 	session, err := json.Marshal(map[string]string{
 		"sessionId":    aws.ToString(token.Credentials.AccessKeyId),
@@ -71,27 +63,25 @@ func FederatedConsoleURL(ctx context.Context, cfg aws.Config, in FederationInput
 		return "", err
 	}
 
-	ui.Info("Requesting sign-in token from the AWS federation endpoint...")
 	signinToken, err := fetchSigninToken(ctx, string(session), seconds)
 	if err != nil {
 		return "", err
 	}
-	ui.Ok("Sign-in token received.")
 
 	params := url.Values{
 		"Action":      {"login"},
-		"Destination": {in.Destination},
+		"Destination": {fmt.Sprintf("https://%s.console.aws.amazon.com/", region)},
 		"SigninToken": {signinToken},
 	}
-	ui.Ok("Console login URL generated (session valid for %ds).", seconds)
+	ui.Ok("Console login URL generated (session valid for %ss).", seconds)
 	return federationEndpoint + "?" + params.Encode(), nil
 }
 
-func fetchSigninToken(ctx context.Context, session string, seconds int32) (string, error) {
+func fetchSigninToken(ctx context.Context, session, seconds string) (string, error) {
 	params := url.Values{
 		"Action":          {"getSigninToken"},
 		"Session":         {session},
-		"SessionDuration": {strconv.Itoa(int(seconds))},
+		"SessionDuration": {seconds},
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,

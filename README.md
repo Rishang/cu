@@ -286,27 +286,21 @@ cu az secrets --vault my-key-vault
 
 # Filter by name prefix
 cu az secrets --vault my-key-vault --filter "prod-"
-
-# JSON output (quieter logging)
-cu az secrets --vault my-key-vault -o json
 ```
 
-**Example output:**
+**Example output** (JSON on stdout, keyed by secret name, so multi-select stays
+unambiguous):
 ```
-[*] Listing secrets from vault my-key-vault with filter: prod-
-[*] Found 5 secrets. Opening fzf for selection...
-[*] Retrieving 1 selected secrets...
-[+] Secrets retrieved successfully.
-
-Name: 'prod-db-password'
-Description: 'password'
-ID: 'https://my-key-vault.vault.azure.net/secrets/prod-db-password/...'
-Value: super-secret-value
-────────────────────────────────────────────────────────────────────────
+[*] Listing secrets from vault my-key-vault
+[*] Filtering by name prefix: prod-
+[*] Found 5 Azure Key Vault secrets. Opening fzf for selection...
+{
+  "prod-db-password": "super-secret-value"
+}
 ```
 
-`Description` carries the secret's Key Vault content type. As with AWS, a value
-that parses as a JSON object is printed as nested JSON instead of a raw string.
+As with AWS, a value that parses as a JSON object is printed as nested JSON
+instead of a raw string.
 
 ### Secret Providers (`vault`)
 
@@ -325,6 +319,14 @@ vault:
       username: ""
       password: ""
       namespace: default        # Vault Enterprise namespace; omit on OSS
+      client_cert: ""           # optional: PEM client cert, e.g. /etc/vault/client.pem
+      client_key: ""            # optional: matching PEM key, e.g. /etc/vault/client-key.pem
+      ca_cert: ""               # optional: PEM CA bundle, e.g. /etc/vault/ca.pem
+    bastion:                     # optional: reach a private endpoint via SSH
+      host: bastion.example.com
+      port: 22                   # optional, default 22
+      user: ec2-user
+      key: ~/.ssh/id_rsa
 
   - profile: inf-prod
     provider: infisical
@@ -337,6 +339,17 @@ vault:
       client_secret: 4c2b...
       namespace: my-org         # organizationSlug; only for sub-organizations
 ```
+
+`client_cert`/`client_key`/`ca_cert` work the same for both providers, since
+they set up the HTTP client rather than anything provider-specific: a client
+cert without its key (or vice versa) is a config error, not a plaintext
+fallback.
+
+`bastion` opens an SSH tunnel to `endpoint`'s host through the named jump host
+before dialing it, for a Vault or Infisical instance that only has a private
+IP. It authenticates to the bastion with `key` alone — no ssh-agent, no
+password — and does not verify the bastion's host key, so that hop needs to
+already be a trusted network.
 
 Keep it owner-readable only: `chmod 600 ~/.config/cu/config.yml`.
 
@@ -400,9 +413,18 @@ export VAULT_INFISICAL_TOKEN=st.xxxxx
 export VAULT_INFISICAL_CLIENT_ID=8f1a...
 export VAULT_INFISICAL_CLIENT_SECRET=4c2b...
 export VAULT_INFISICAL_NAMESPACE=my-org
+
+# Available under either block: mTLS and the SSH bastion hop
+export VAULT_HASHICORP_CLIENT_CERT=/etc/cu/client.pem
+export VAULT_HASHICORP_CLIENT_KEY=/etc/cu/client-key.pem
+export VAULT_HASHICORP_CA_CERT=/etc/cu/ca.pem
+export VAULT_HASHICORP_BASTION_HOST=jump.example.com
+export VAULT_HASHICORP_BASTION_PORT=22
+export VAULT_HASHICORP_BASTION_USER=ec2-user
+export VAULT_HASHICORP_BASTION_KEY=~/.ssh/id_ed25519
 ```
 
-Two traps worth knowing:
+Three traps worth knowing:
 
 - `VAULT_PROVIDER` alone is a whole connection, so with it set and no `--profile`
   (or `VAULT_PROFILE`) `cu` never reads the `vault:` list — it will not
@@ -412,6 +434,9 @@ Two traps worth knowing:
   than a silent half-and-half connection.
 - Only the selected provider's block is looked at. A leftover
   `VAULT_HASHICORP_TOKEN` cannot leak into an Infisical connection.
+- The bastion keys carry a `BASTION_` prefix on purpose. `_BASTION_HOST` is the
+  SSH jump host; `_ENDPOINT` is the secret server you reach through it. A
+  `_BASTION_PORT` that is not a number is an error rather than a silent 22.
 
 An empty export is the same as an unset one — it falls through to the file
 rather than blanking the field.
@@ -509,9 +534,6 @@ cu k secrets --namespace default
 cu k secrets --all-namespaces
 # or
 cu k secrets -A
-
-# Choose namespace interactively first, then pick secrets
-cu k secrets --select-namespace
 ```
 
 **Example output** (two selected keys — the JSON is keyed by the full
@@ -538,9 +560,6 @@ cu k configmaps --namespace kube-system
 cu k configmaps --all-namespaces
 # or
 cu k configmaps -A
-
-# Choose namespace interactively first, then pick ConfigMaps
-cu k configmaps --select-namespace
 ```
 
 **Example output** (one selected key):
@@ -751,14 +770,18 @@ cu diff -f dev.yaml -f stage.yaml -f prod.yaml
 # compares: dev↔stage, dev↔prod, stage↔prod
 ```
 
-#### Filter with a path prefix or JMESPath (`-q`)
+#### Filter with a path prefix (`-q`)
 
 ```bash
 # Show only diffs under configmap.data
 cu diff -f qa/values.yaml -f prod/values.yaml -q "configmap.data"
+```
 
-# JMESPath expression
-cu diff -f a.yaml -f b.yaml -q "[?kind=='changed']"
+Anything richer than a prefix belongs in `jq`, which `--format json` feeds
+directly:
+
+```bash
+cu diff -f a.yaml -f b.yaml --format json | jq '[.diffs[] | select(.kind=="changed")]'
 ```
 
 #### Ignore rules
@@ -809,11 +832,11 @@ cu diff --config cu_diff.yml
 
 ```yaml
 format: table                        # default output format (table | unified | json)
-query: configmap.data                # global path prefix or JMESPath filter
+query: configmap.data                # global path prefix filter
 global_ignore_keys:
   - metadata
   - status
-global_ignore_patterns: "qa,prod,stage"   # comma-separated string or YAML list
+global_ignore_patterns: [qa, prod, stage]
 
 diffs:
   # Two-way diff
@@ -837,21 +860,6 @@ diffs:
 ```
 
 Config file paths are resolved relative to the config file's location, so you can run `cu diff` from any directory.
-
-#### Print config schema
-
-```bash
-cu diff --print-schema    # schema for cu_diff.yml
-```
-
-The schema output is designed to be fed to an AI/CLI agent. Pipe it along with your file list to auto-generate a valid `cu_diff.yml`:
-
-```bash
-# Let an LLM generate cu_diff.yml for your files
-cu diff --print-schema | llm "Generate a cu_diff.yml for these helm values files: \
-  k8s/helm/*/values-qa.yaml vs k8s/helm/*/values-prod.yaml \
-  with ignore_patterns: qa,prod"
-```
 
 ### Format Conversion
 

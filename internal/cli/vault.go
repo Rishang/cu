@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
-	"sort"
+	"slices"
 	"strings"
 
 	"golang.org/x/sync/errgroup"
@@ -21,13 +21,20 @@ type vaultClient struct {
 	endpoint  string
 	token     string
 	namespace string
+	// httpClient is the profile's own only when mTLS or a bastion needs one.
+	httpClient *http.Client
 }
 
 func newVaultClient(ctx context.Context, p secretProvider) (secretStore, error) {
+	endpoint, httpClient, err := dialProfile(ctx, p)
+	if err != nil {
+		return nil, err
+	}
 	client := &vaultClient{
-		endpoint:  strings.TrimRight(p.Endpoint, "/"),
-		token:     p.Credentials.Token,
-		namespace: p.Credentials.Namespace,
+		endpoint:   endpoint,
+		token:      p.Credentials.Token,
+		namespace:  p.Credentials.Namespace,
+		httpClient: httpClient,
 	}
 	if client.token != "" {
 		return client, nil
@@ -116,13 +123,13 @@ func (c *vaultClient) kvMounts(ctx context.Context) ([]string, error) {
 		mounts = append(mounts, strings.Trim(mountPath, "/"))
 	}
 	if len(skipped) > 0 {
-		sort.Strings(skipped)
+		slices.Sort(skipped)
 		ui.Warn("Skipping KV v1 mount(s): %s", strings.Join(skipped, ", "))
 	}
 	if len(mounts) == 0 {
 		return nil, fmt.Errorf("no KV v2 mounts visible to this token")
 	}
-	sort.Strings(mounts)
+	slices.Sort(mounts)
 	return mounts, nil
 }
 
@@ -246,7 +253,7 @@ func (c *vaultClient) kvPath(mount, verb, secretPath string) string {
 }
 
 func (c *vaultClient) request(ctx context.Context, method, path string, body []byte) ([]byte, error) {
-	return apiRequest(ctx, method, c.endpoint+path, map[string]string{
+	return apiRequest(ctx, c.httpClient, method, c.endpoint+path, map[string]string{
 		"X-Vault-Token":     c.token,
 		"X-Vault-Namespace": c.namespace,
 	}, body)

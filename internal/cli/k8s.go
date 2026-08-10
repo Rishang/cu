@@ -18,9 +18,9 @@ func newK8sCommand() *cobra.Command {
 	}
 	cmd.AddCommand(
 		newK8sKeyCommand("secrets", "Interactive fzf view for Kubernetes secrets (base64-decoded)",
-			"k8s secret key", kube.ListSecretKeys, kube.SecretValue),
+			"k8s secret key", "secrets", kube.SecretValue),
 		newK8sKeyCommand("configmaps", "Interactive fzf view for Kubernetes ConfigMaps",
-			"k8s configmap key", kube.ListConfigMapKeys, kube.ConfigMapValue),
+			"k8s configmap key", "configmaps", kube.ConfigMapValue),
 		newKubeLogsCommand(),
 		newKubeExecCommand(),
 		newKubeSwitchCommand("ctx", "Switch between Kubernetes contexts interactively",
@@ -73,7 +73,7 @@ container it came from.
 	}
 
 	flags := cmd.Flags()
-	addPodScopeFlags(cmd, &allNamespaces, &namespace)
+	addScopeFlags(cmd, &allNamespaces, &namespace)
 	flags.BoolVarP(&follow, "follow", "f", false, "Stream new log lines as they arrive.")
 	flags.IntVarP(&tail, "tail", "t", -1, "Show only this many recent lines per pod (-1 for all).")
 	return cmd
@@ -136,13 +136,13 @@ cu exits with the command's own status, so this works in a script.`,
 		},
 	}
 
-	addPodScopeFlags(cmd, &allNamespaces, &namespace)
+	addScopeFlags(cmd, &allNamespaces, &namespace)
 	cmd.Flags().StringVarP(&container, "container", "c", "",
 		"Container to exec into (prompts when the pod has several).")
 	return cmd
 }
 
-func addPodScopeFlags(cmd *cobra.Command, allNamespaces *bool, namespace *string) {
+func addScopeFlags(cmd *cobra.Command, allNamespaces *bool, namespace *string) {
 	cmd.Flags().BoolVarP(allNamespaces, "all-namespaces", "A", false,
 		"Search across all namespaces.")
 	cmd.Flags().StringVarP(namespace, "namespace", "n", "",
@@ -178,14 +178,12 @@ func pickPod(allNamespaces bool, namespace string) (*kube.Pod, error) {
 // newK8sKeyCommand builds the shared list → fzf → print flow used by both
 // secrets and configmaps.
 func newK8sKeyCommand(
-	use, short, itemName string,
-	list func(allNamespaces bool, namespace string) ([]kube.KeyRef, error),
+	use, short, itemName, resource string,
 	value func(kube.KeyRef) (string, error),
 ) *cobra.Command {
 	var (
-		allNamespaces   bool
-		namespace       string
-		selectNamespace bool
+		allNamespaces bool
+		namespace     string
 	)
 
 	cmd := &cobra.Command{
@@ -193,25 +191,7 @@ func newK8sKeyCommand(
 		Short: short,
 		Args:  cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			// Unlike logs, the reset is load-bearing: it lets --select-namespace
-			// still prompt when -A was passed alongside -n.
-			if allNamespaces {
-				namespace = ""
-			}
-
-			if selectNamespace && namespace == "" {
-				namespaces, err := kube.ListNamespaces()
-				if err != nil {
-					return err
-				}
-				chosen, err := pickStrings(namespaces, "namespace", pick.Options{Prompt: "namespace> "})
-				if err != nil || len(chosen) == 0 {
-					return err
-				}
-				namespace, allNamespaces = chosen[0], false
-			}
-
-			refs, err := list(allNamespaces, namespace)
+			refs, err := kube.ListKeys(resource, allNamespaces, namespace)
 			if err != nil {
 				return err
 			}
@@ -223,13 +203,7 @@ func newK8sKeyCommand(
 		},
 	}
 
-	flags := cmd.Flags()
-	flags.BoolVarP(&allNamespaces, "all-namespaces", "A", false,
-		"Search across all namespaces.")
-	flags.StringVarP(&namespace, "namespace", "n", "",
-		"Namespace to search (ignored with --all-namespaces).")
-	flags.BoolVar(&selectNamespace, "select-namespace", false,
-		"Use fzf to pick a namespace instead of scanning all of them.")
+	addScopeFlags(cmd, &allNamespaces, &namespace)
 	return cmd
 }
 

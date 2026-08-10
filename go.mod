@@ -12,12 +12,12 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/ssm v1.73.2
 	github.com/aws/aws-sdk-go-v2/service/sts v1.45.2
 	github.com/goccy/go-yaml v1.19.2
-	github.com/jmespath-community/go-jmespath v1.1.1
 	github.com/junegunn/fzf v0.74.1
 	github.com/mattn/go-runewidth v0.0.24
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/spf13/cobra v1.10.2
 	github.com/tmccombs/hcl2json v0.6.9
+	golang.org/x/crypto v0.53.0
 	golang.org/x/sync v0.21.0
 	golang.org/x/term v0.45.0
 )
@@ -60,8 +60,6 @@ require (
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/zclconf/go-cty v1.18.0 // indirect
-	golang.org/x/crypto v0.53.0 // indirect
-	golang.org/x/exp v0.0.0-20260611194520-c48552f49976 // indirect
 	golang.org/x/mod v0.37.0 // indirect
 	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect

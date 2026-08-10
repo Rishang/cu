@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,27 +18,7 @@ import (
 )
 
 // supportedExtensions lists every file type cu diff can parse.
-var supportedExtensions = map[string]bool{
-	".json":   true,
-	".yaml":   true,
-	".yml":    true,
-	".toml":   true,
-	".tf":     true,
-	".hcl":    true,
-	".tfvars": true,
-}
-
-// hclExtensions are parsed as HCL and rendered with HCL value formatting.
-var hclExtensions = map[string]bool{".tf": true, ".hcl": true, ".tfvars": true}
-
-// IsHCL reports whether a path is parsed as HCL.
-func IsHCL(path string) bool {
-	return hclExtensions[strings.ToLower(filepath.Ext(path))]
-}
-
-func supportedList() string {
-	return strings.Join(slices.Sorted(maps.Keys(supportedExtensions)), ", ")
-}
+var supportedExtensions = []string{".hcl", ".json", ".tf", ".tfvars", ".toml", ".yaml", ".yml"}
 
 // LoadFile parses a structured config file into plain Go values.
 func LoadFile(path string) (any, error) {
@@ -52,8 +31,9 @@ func LoadFile(path string) (any, error) {
 	}
 
 	ext := strings.ToLower(filepath.Ext(path))
-	if !supportedExtensions[ext] {
-		return nil, fmt.Errorf("Unsupported format %q. Supported: %s", ext, supportedList())
+	if !slices.Contains(supportedExtensions, ext) {
+		return nil, fmt.Errorf("Unsupported format %q. Supported: %s",
+			ext, strings.Join(supportedExtensions, ", "))
 	}
 
 	switch ext {

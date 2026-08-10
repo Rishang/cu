@@ -264,9 +264,10 @@ func TestRenderUnified(t *testing.T) {
 		BranchA: "main", BranchB: "feature",
 	})
 
+	// No file header here: cli.printPairHeader already names both files and
+	// their branches directly above this output.
 	out := stderr.String()
 	for _, want := range []string{
-		"--- a/a.yaml", "(main)", "+++ b/b.yaml", "(feature)",
 		"@@ spec @@", "@@ meta @@",
 		"replicas:", "1 → 3",
 		"(string → int)", // the type-change note
@@ -298,20 +299,5 @@ func TestRenderIgnoredSection(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing ignored path %q:\n%s", want, out)
 		}
-	}
-}
-
-func TestRenderHCLValuesUseHCLSyntax(t *testing.T) {
-	_, stderr := capture(t)
-
-	Render([]Entry{changed([]any{"region"}, "us-east-1", "eu-west-1")},
-		RenderOptions{Format: FormatTable, FileA: "a.tf", FileB: "b.tf", HCL: true})
-
-	out := stderr.String()
-	if !strings.Contains(out, `"us-east-1"`) {
-		t.Errorf("HCL values should be double-quoted:\n%s", out)
-	}
-	if strings.Contains(out, "'us-east-1'") {
-		t.Errorf("HCL values must not use Python-style quoting:\n%s", out)
 	}
 }

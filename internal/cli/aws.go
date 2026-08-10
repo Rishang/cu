@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -83,26 +84,13 @@ func newAWSLoginCommand() *cobra.Command {
 
 			// LoadConfig already applied --region, so cfg.Region is the
 			// resolved one; fall back only when nothing resolved at all.
-			region := cfg.Region
-			if region == "" {
-				region = "us-east-1"
-			}
-
-			profileLabel := creds.profile
-			if profileLabel == "" {
-				profileLabel = os.Getenv("AWS_PROFILE")
-			}
-			if profileLabel == "" {
-				profileLabel = "default"
-			}
+			region := cmp.Or(cfg.Region, "us-east-1")
+			profileLabel := cmp.Or(creds.profile, os.Getenv("AWS_PROFILE"), "default")
 			ui.Info("Using AWS (profile: %s, region: %s)",
 				ui.Cyan.Render(profileLabel), ui.Cyan.Render(region))
 
-			url, err := awsx.FederatedConsoleURL(ctx, cfg, awsx.FederationInput{
-				Duration:    time.Duration(duration) * time.Hour,
-				Policy:      policy,
-				Destination: fmt.Sprintf("https://%s.console.aws.amazon.com/", region),
-			})
+			url, err := awsx.FederatedConsoleURL(ctx, cfg, region,
+				time.Duration(duration)*time.Hour, policy)
 			if err != nil {
 				return err
 			}
@@ -156,8 +144,7 @@ func newSSMParametersCommand() *cobra.Command {
 			}
 			return pickAndPrint(names, itself, "SSM parameter", "parameter> ",
 				func(name string) (string, string, error) {
-					param, err := awsx.GetParameter(ctx, cfg, name)
-					return param.Name, param.Value, err
+					return awsx.GetParameter(ctx, cfg, name)
 				})
 		},
 	}
@@ -225,10 +212,9 @@ func newAWSSecretsCommand() *cobra.Command {
 				return err
 			}
 
+			ui.Info("Listing secrets")
 			if nameFilter != "" {
-				ui.Info("Listing secrets with filter: %s", ui.Cyan.Render(nameFilter))
-			} else {
-				ui.Info("Listing secrets")
+				ui.Info("Filtering by name: %s", ui.Cyan.Render(nameFilter))
 			}
 			names, err := awsx.ListSecrets(ctx, cfg, nameFilter)
 			if err != nil {
@@ -238,8 +224,8 @@ func newAWSSecretsCommand() *cobra.Command {
 			// string, so jq can walk into it.
 			return pickAndPrint(names, itself, "AWS secret", "secret> ",
 				func(name string) (string, any, error) {
-					secret, err := awsx.GetSecret(ctx, cfg, name)
-					return secret.Name, decodeSecretValue(secret.Value), err
+					resolved, value, err := awsx.GetSecret(ctx, cfg, name)
+					return resolved, decodeSecretValue(value), err
 				})
 		},
 	}

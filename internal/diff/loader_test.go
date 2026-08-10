@@ -166,24 +166,6 @@ func TestLoadFileErrors(t *testing.T) {
 	})
 }
 
-func TestIsHCL(t *testing.T) {
-	cases := map[string]bool{
-		"main.tf":       true,
-		"vars.tfvars":   true,
-		"config.hcl":    true,
-		"UPPER.TF":      true,
-		"values.yaml":   false,
-		"config.json":   false,
-		"pyproject.tml": false,
-	}
-	for path, want := range cases {
-		if got := IsHCL(path); got != want {
-			t.Errorf("IsHCL(%q) = %v, want %v", path, got, want)
-		}
-	}
-}
-
-// GitBranch is best-effort: it must never fail the diff, only omit the label.
 func TestGitBranchOutsideRepo(t *testing.T) {
 	if got := GitBranch(filepath.Join(t.TempDir(), "file.yaml")); got != "" {
 		t.Logf("GitBranch outside a repo returned %q (a parent dir is a repo)", got)

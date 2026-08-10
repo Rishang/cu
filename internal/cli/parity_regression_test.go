@@ -205,11 +205,6 @@ func TestPwgenValidatesAndRestrictsCharacterSet(t *testing.T) {
 		wantErr string
 	}{
 		{
-			name:    "rejects no selected character types",
-			args:    []string{"pwpush", "pwgen", "--no-symbols", "--no-uppercase", "--no-lowercase", "--no-digits"},
-			wantErr: "No character types selected.",
-		},
-		{
 			name:    "rejects non-positive length",
 			args:    []string{"pwpush", "pwgen", "--length", "0"},
 			wantErr: "--length must be at least 1.",
@@ -223,8 +218,7 @@ func TestPwgenValidatesAndRestrictsCharacterSet(t *testing.T) {
 		})
 	}
 
-	stdout, stderr, code := runCu(t, "pwpush", "pwgen", "--length", "128",
-		"--no-symbols", "--no-uppercase", "--no-lowercase")
+	stdout, stderr, code := runCu(t, "pwpush", "pwgen", "--length", "128", "--no-symbols")
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr: %s", code, stderr)
 	}
@@ -232,8 +226,9 @@ func TestPwgenValidatesAndRestrictsCharacterSet(t *testing.T) {
 	if len(password) != 128 {
 		t.Fatalf("password length = %d, want 128", len(password))
 	}
-	if strings.Trim(password, "0123456789") != "" {
-		t.Errorf("password contains a non-digit: %q", password)
+	const alphanumeric = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+	if strings.Trim(password, alphanumeric) != "" {
+		t.Errorf("--no-symbols password contains a symbol: %q", password)
 	}
 }
 

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -120,13 +121,9 @@ func captureFromEditor(name string) (string, error) {
 		return "", err
 	}
 
-	editor := os.Getenv("EDITOR")
-	if editor == "" {
-		editor = "vim"
-		if _, err := exec.LookPath(editor); err != nil {
-			editor = "nano"
-		}
-	}
+	// vi rather than a LookPath dance over vim/nano: POSIX mandates it, and
+	// probing early only moves the same "no editor" failure a line sooner.
+	editor := cmp.Or(os.Getenv("EDITOR"), "vi")
 	cmd := exec.Command(editor, path)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stderr, os.Stderr
 	runErr := cmd.Run()

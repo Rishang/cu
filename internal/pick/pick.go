@@ -89,7 +89,8 @@ func Select[T any](items []T, label func(T) string, opts Options) ([]T, error) {
 
 // runFZF feeds labels to fzf over a channel and returns the selected lines. No
 // subprocess is involved; fzf opens the tty itself for its UI, leaving our
-// stdin and stdout alone.
+// stdin and stdout alone. Split out from Select so the tests can drive it with
+// fzf's non-interactive --filter mode, which needs no tty.
 func runFZF(labels []string, args []string) ([]string, error) {
 	opts, err := fzf.ParseOptions(true, args)
 	if err != nil {

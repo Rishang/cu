@@ -43,12 +43,12 @@ func TestDialBastion(t *testing.T) {
 	p.Bastion.User = "test"
 	p.Bastion.Key = clientKeyPath
 
-	tunnel, err := dialBastion(context.Background(), p, echoAddr)
+	local, err := dialBastion(context.Background(), p, echoAddr)
 	if err != nil {
 		t.Fatalf("dialBastion: %v", err)
 	}
 
-	conn, err := net.Dial("tcp", tunnel.Addr())
+	conn, err := net.Dial("tcp", local)
 	if err != nil {
 		t.Fatalf("dialing tunnel: %v", err)
 	}

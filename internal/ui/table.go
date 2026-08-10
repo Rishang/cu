@@ -152,7 +152,11 @@ func (t *Table) columnWidths(cols int) []int {
 	// Overhead: one vertical rule per column plus a closing one, and a space of
 	// padding on each side of every cell.
 	budget := maxWidth - (cols + 1) - 2*cols
-	for total(widths) > budget {
+	sum := 0
+	for _, w := range widths {
+		sum += w
+	}
+	for sum > budget {
 		idx := t.widestShrinkable(widths, false)
 		if idx < 0 {
 			// Only protected columns are left with room to give.
@@ -162,6 +166,7 @@ func (t *Table) columnWidths(cols int) []int {
 			break // every column is at its floor
 		}
 		widths[idx]--
+		sum--
 	}
 	return widths
 }
@@ -183,14 +188,6 @@ func (t *Table) widestShrinkable(widths []int, includeProtected bool) int {
 		widest, idx = cw, i
 	}
 	return idx
-}
-
-func total(widths []int) int {
-	sum := 0
-	for _, w := range widths {
-		sum += w
-	}
-	return sum
 }
 
 func (t *Table) renderRow(w io.Writer, row []Cell, widths []int) {
@@ -226,7 +223,7 @@ func (t *Table) renderRow(w io.Writer, row []Cell, widths []int) {
 }
 
 func (t *Table) pad(content string, width, col int) string {
-	gap := width - visibleWidth(content)
+	gap := width - TextWidth(content)
 	if gap < 0 {
 		gap = 0
 	}
@@ -243,37 +240,4 @@ func (t *Table) pad(content string, width, col int) string {
 	default:
 		return content + strings.Repeat(" ", gap)
 	}
-}
-
-// Columns renders label/value pairs as a borderless summary block, matching the
-// counts line the Python renderer printed under each diff.
-func Columns(w io.Writer, headers []string, values []string, styles []Style) {
-	if len(headers) == 0 {
-		return
-	}
-	widths := make([]int, len(headers))
-	for i := range headers {
-		widths[i] = max(visibleWidth(headers[i]), visibleWidth(values[i]))
-	}
-
-	var head, body strings.Builder
-	for i := range headers {
-		head.WriteString(Dim.Render(padRight(headers[i], widths[i])))
-		head.WriteString("   ")
-		style := Plain
-		if i < len(styles) {
-			style = styles[i]
-		}
-		body.WriteString(style.Render(padRight(values[i], widths[i])))
-		body.WriteString("   ")
-	}
-	fmt.Fprintln(w, strings.TrimRight(head.String(), " "))
-	fmt.Fprintln(w, strings.TrimRight(body.String(), " "))
-}
-
-func padRight(s string, width int) string {
-	if gap := width - visibleWidth(s); gap > 0 {
-		return s + strings.Repeat(" ", gap)
-	}
-	return s
 }

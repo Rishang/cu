@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/Rishang/cloudutil/internal/ui"
@@ -19,27 +18,19 @@ type RenderOptions struct {
 	FileB   string
 	BranchA string
 	BranchB string
-	HCL     bool // format values as HCL literals
 	Ignored []Entry
 }
-
-// valueFormatter renders a value for display.
-type valueFormatter func(any) string
 
 // Render writes entries in the requested format. Table and unified output go to
 // stderr; JSON goes to stdout so it stays pipeable.
 func Render(entries []Entry, o RenderOptions) {
-	format := formatValue
-	if o.HCL {
-		format = formatHCL
-	}
 	switch o.Format {
 	case FormatJSON:
 		renderJSON(entries, o)
 	case FormatTable:
-		renderTable(entries, o, format)
+		renderTable(entries, o)
 	default:
-		renderUnified(entries, o, format)
+		renderUnified(entries, o)
 	}
 }
 
@@ -53,9 +44,7 @@ type renderLine struct {
 	segs     []ui.Segment
 }
 
-func renderUnified(entries []Entry, o RenderOptions, format valueFormatter) {
-	printUnifiedHeader(o)
-
+func renderUnified(entries []Entry, o RenderOptions) {
 	if len(entries) == 0 {
 		ui.Print("")
 		ui.Print(ui.BoldGreen.Render("✓  No differences"))
@@ -74,7 +63,7 @@ func renderUnified(entries []Entry, o RenderOptions, format valueFormatter) {
 
 	var added, removed, changed int
 	for _, section := range slices.Sorted(maps.Keys(groups)) {
-		lines := buildLines(groups[section], section, format)
+		lines := buildLines(groups[section], section)
 		label := fmt.Sprintf("(%d change%s)", len(lines), plural(len(lines)))
 		ui.Print("")
 		ui.Printf("%s  %s", ui.BoldCyan.Sprintf("@@ %s @@", section), ui.Dim.Render(label))
@@ -103,17 +92,6 @@ func renderUnified(entries []Entry, o RenderOptions, format valueFormatter) {
 	renderSummary(added, removed, changed)
 }
 
-func printUnifiedHeader(o RenderOptions) {
-	tag := func(branch string) string {
-		if branch == "" {
-			return ""
-		}
-		return ui.Dim.Sprintf("  (%s)", branch)
-	}
-	ui.Print(ui.BoldRed.Sprintf("--- a/%s", o.FileA) + tag(o.BranchA))
-	ui.Print(ui.BoldGreen.Sprintf("+++ b/%s", o.FileB) + tag(o.BranchB))
-}
-
 func printLine(ln renderLine, pad int) {
 	var b strings.Builder
 	b.WriteString(ln.symStyle.Render(ln.sym))
@@ -132,7 +110,7 @@ func printLine(ln renderLine, pad int) {
 	ui.Print(b.String())
 }
 
-func buildLines(group []Entry, section string, format valueFormatter) []renderLine {
+func buildLines(group []Entry, section string) []renderLine {
 	var lines []renderLine
 	for _, e := range group {
 		rel := relativeKey(e.PathStr(), section)
@@ -141,32 +119,32 @@ func buildLines(group []Entry, section string, format valueFormatter) []renderLi
 			for _, kv := range expand(rel, e.New) {
 				lines = append(lines, renderLine{
 					sym: "+", symStyle: ui.Green, key: kv.key, keyStyle: ui.Green,
-					segs: []ui.Segment{{Text: format(kv.value), Style: ui.Green}},
+					segs: []ui.Segment{{Text: formatValue(kv.value), Style: ui.Green}},
 				})
 			}
 		case KindRemoved:
 			for _, kv := range expand(rel, e.Old) {
 				lines = append(lines, renderLine{
 					sym: "-", symStyle: ui.Red, key: kv.key, keyStyle: ui.Red,
-					segs: []ui.Segment{{Text: format(kv.value), Style: ui.Red}},
+					segs: []ui.Segment{{Text: formatValue(kv.value), Style: ui.Red}},
 				})
 			}
 		case KindChanged:
-			lines = append(lines, changedLines(rel, e.Old, e.New, "", format)...)
+			lines = append(lines, changedLines(rel, e.Old, e.New, "")...)
 		case KindTypeChanged:
 			note := fmt.Sprintf("  (%s → %s)", typeName(e.Old), typeName(e.New))
-			lines = append(lines, changedLines(rel, e.Old, e.New, note, format)...)
+			lines = append(lines, changedLines(rel, e.Old, e.New, note)...)
 		}
 	}
 	return lines
 }
 
-func changedLines(key string, old, new any, note string, format valueFormatter) []renderLine {
+func changedLines(key string, old, new any, note string) []renderLine {
 	if isScalar(old) && isScalar(new) {
 		segs := []ui.Segment{
-			{Text: format(old), Style: ui.Red},
+			{Text: formatValue(old), Style: ui.Red},
 			{Text: " → ", Style: ui.Dim},
-			{Text: format(new), Style: ui.Green},
+			{Text: formatValue(new), Style: ui.Green},
 		}
 		if note != "" {
 			segs = append(segs, ui.Segment{Text: note, Style: ui.DimItalic})
@@ -176,14 +154,14 @@ func changedLines(key string, old, new any, note string, format valueFormatter) 
 
 	// Non-scalar values are too long to show inline; emit removed then added,
 	// with any type note attached to the removed side.
-	removedSegs := []ui.Segment{{Text: format(old), Style: ui.Red}}
+	removedSegs := []ui.Segment{{Text: formatValue(old), Style: ui.Red}}
 	if note != "" {
 		removedSegs = append(removedSegs, ui.Segment{Text: note, Style: ui.DimItalic})
 	}
 	return []renderLine{
 		{sym: "-", symStyle: ui.Red, key: key, keyStyle: ui.Red, segs: removedSegs},
 		{sym: "+", symStyle: ui.Green, key: key, keyStyle: ui.Green,
-			segs: []ui.Segment{{Text: format(new), Style: ui.Green}}},
+			segs: []ui.Segment{{Text: formatValue(new), Style: ui.Green}}},
 	}
 }
 
@@ -239,7 +217,7 @@ func expand(prefix string, value any) []keyValue {
 
 // ── table ─────────────────────────────────────────────────────────────────────
 
-func renderTable(entries []Entry, o RenderOptions, format valueFormatter) {
+func renderTable(entries []Entry, o RenderOptions) {
 	if len(entries) == 0 {
 		renderIgnored(o.Ignored)
 		ui.Print(ui.BoldGreen.Render("✓  No differences"))
@@ -279,14 +257,14 @@ func renderTable(entries []Entry, o RenderOptions, format valueFormatter) {
 		case KindAdded:
 			added++
 			sym, symStyle = "+", ui.Green
-			oldCell, newCell = dash, ui.Text(format(e.New), ui.Green)
+			oldCell, newCell = dash, ui.Text(formatValue(e.New), ui.Green)
 		case KindRemoved:
 			removed++
 			sym, symStyle = "-", ui.Red
-			oldCell, newCell = ui.Text(format(e.Old), ui.Red), dash
+			oldCell, newCell = ui.Text(formatValue(e.Old), ui.Red), dash
 		default:
 			changed++
-			oldCell, newCell = wordDiff(format(e.Old), format(e.New))
+			oldCell, newCell = wordDiff(formatValue(e.Old), formatValue(e.New))
 		}
 		table.Rows = append(table.Rows, []ui.Cell{
 			ui.Text(sym, symStyle),
@@ -372,15 +350,12 @@ func renderJSON(entries []Entry, o RenderOptions) {
 		})
 	}
 
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
+	enc := json.NewEncoder(ui.Out)
 	enc.SetEscapeHTML(false)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(out); err != nil {
 		ui.Error("could not encode diff as JSON: %v", err)
-		return
 	}
-	fmt.Fprint(ui.Out, buf.String())
 }
 
 // ── shared ────────────────────────────────────────────────────────────────────
@@ -397,11 +372,12 @@ func renderIgnored(ignored []Entry) {
 }
 
 func renderSummary(added, removed, changed int) {
-	ui.Columns(ui.Err,
-		[]string{"+  added", "-  removed", "~  changed"},
-		[]string{strconv.Itoa(added), strconv.Itoa(removed), strconv.Itoa(changed)},
-		[]ui.Style{ui.BoldGreen, ui.BoldRed, ui.BoldYellow},
-	)
+	// One line, not a padded grid: %-Ns counts the escape codes a Style adds,
+	// so anything column-aligned here would come out crooked once colored.
+	ui.Printf("%s   %s   %s",
+		ui.BoldGreen.Sprintf("+  added %d", added),
+		ui.BoldRed.Sprintf("-  removed %d", removed),
+		ui.BoldYellow.Sprintf("~  changed %d", changed))
 }
 
 func plural(n int) string {
@@ -451,42 +427,6 @@ func formatValue(v any) string {
 		return "'" + t + "'"
 	case map[string]any, []any:
 		return compactJSON(t)
-	default:
-		return fmt.Sprint(t)
-	}
-}
-
-// formatHCL renders a value as an HCL literal.
-func formatHCL(v any) string {
-	switch t := v.(type) {
-	case nil:
-		return "null"
-	case bool:
-		if t {
-			return "true"
-		}
-		return "false"
-	case string:
-		return `"` + t + `"`
-	case int64:
-		return strconv.FormatInt(t, 10)
-	case float64:
-		return strconv.FormatFloat(t, 'g', -1, 64)
-	case []any:
-		items := make([]string, len(t))
-		for i, item := range t {
-			items[i] = formatHCL(item)
-		}
-		return "[" + strings.Join(items, ", ") + "]"
-	case map[string]any:
-		pairs := make([]string, 0, len(t))
-		for _, k := range slices.Sorted(maps.Keys(t)) {
-			pairs = append(pairs, fmt.Sprintf("%s = %s", k, formatHCL(t[k])))
-		}
-		if len(pairs) == 0 {
-			return "{}"
-		}
-		return "{ " + strings.Join(pairs, " ") + " }"
 	default:
 		return fmt.Sprint(t)
 	}

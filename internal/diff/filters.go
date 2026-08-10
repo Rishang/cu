@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-
-	jmespath "github.com/jmespath-community/go-jmespath"
 )
 
 // FilterRules collects the ignore rules applied to one diff pair. Global rules
@@ -55,79 +53,13 @@ func pathHasKey(e Entry, ignoreKeys []string) bool {
 	return false
 }
 
-// Query filters entries by a bare path prefix or a JMESPath expression.
+// Query keeps the entries at or under a dotted path prefix:
 //
-// Path prefix (does not start with '['):
+//	spec.replicas                that path and anything nested under it
 //
-//	spec.replicas                keeps that path and anything nested under it
-//
-// JMESPath (starts with '['), applied to [{path, kind, old, new}]:
-//
-//	[?kind=='changed']
-//	[?contains(path, 'resources')]
-func Query(entries []Entry, query string) ([]Entry, error) {
-	if !strings.HasPrefix(strings.TrimLeft(query, " \t"), "[") {
-		return prefixFilter(entries, strings.TrimRight(query, ".")), nil
-	}
-
-	expr, err := jmespath.Compile(query)
-	if err != nil {
-		return nil, fmt.Errorf("invalid JMESPath query %q: %w", query, err)
-	}
-
-	data := make([]any, 0, len(entries))
-	for _, e := range entries {
-		data = append(data, map[string]any{
-			"path": e.PathStr(),
-			"kind": string(e.Kind),
-			"old":  e.Old,
-			"new":  e.New,
-		})
-	}
-
-	result, err := expr.Search(data)
-	if err != nil {
-		return nil, fmt.Errorf("invalid JMESPath query %q: %w", query, err)
-	}
-	if result == nil {
-		return nil, nil
-	}
-
-	rows, ok := result.([]any)
-	if !ok {
-		rows = []any{result}
-	}
-
-	keep := make(map[string]struct{}, len(rows))
-	for _, row := range rows {
-		m, ok := row.(map[string]any)
-		if !ok {
-			continue
-		}
-		path, hasPath := m["path"].(string)
-		kind, hasKind := m["kind"].(string)
-		if hasPath && hasKind {
-			keep[path+"\x00"+kind] = struct{}{}
-		}
-	}
-
-	// A projection like `[].path` or `length(@)` returns rows the filter cannot
-	// map back to entries. Silently keeping nothing would read as "no
-	// differences", so say what went wrong instead.
-	if len(keep) == 0 && len(rows) > 0 {
-		return nil, fmt.Errorf("JMESPath query %q must return whole diff entries, not %T values — try a filter like [?kind=='changed']", query, rows[0])
-	}
-
-	var out []Entry
-	for _, e := range entries {
-		if _, ok := keep[e.PathStr()+"\x00"+string(e.Kind)]; ok {
-			out = append(out, e)
-		}
-	}
-	return out, nil
-}
-
-func prefixFilter(entries []Entry, prefix string) []Entry {
+// Anything richer belongs in jq, which --format json feeds directly.
+func Query(entries []Entry, query string) []Entry {
+	prefix := strings.TrimRight(strings.TrimSpace(query), ".")
 	var out []Entry
 	for _, e := range entries {
 		p := e.PathStr()

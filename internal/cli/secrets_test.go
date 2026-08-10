@@ -5,7 +5,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -236,23 +235,51 @@ func TestMTLSClient(t *testing.T) {
 	}
 }
 
-// TestEnvKeysCoverCredentials pins the tag-derived naming: every credential
-// field is reachable from the environment, so adding one to secretProvider
-// cannot silently leave it file-only.
-func TestEnvKeysCoverCredentials(t *testing.T) {
-	creds := reflect.TypeOf(secretProvider{}.Credentials)
-	for i := range creds.NumField() {
-		tag, _, _ := strings.Cut(creds.Field(i).Tag.Get("yaml"), ",")
-		if tag == "" {
-			t.Fatalf("%s has no yaml tag, so it has no environment variable either",
-				creds.Field(i).Name)
-		}
-		t.Setenv("VAULT_HASHICORP_"+strings.ToUpper(tag), "set")
-		overlaid := envOverlay(secretProvider{Provider: "vault"})
-		got := reflect.ValueOf(overlaid.Credentials).Field(i).String()
-		if got != "set" {
-			t.Errorf("credentials.%s = %q after VAULT_HASHICORP_%s=set; want it applied",
-				tag, got, strings.ToUpper(tag))
-		}
+// TestEnvOverlayAppliesEveryKey pins the VAULT_<PROVIDER>_* names, which are
+// spelled out rather than derived from yaml tags: the whole set is a documented
+// interface, so a field added to secretProvider must be added here too.
+func TestEnvOverlayAppliesEveryKey(t *testing.T) {
+	for key, read := range map[string]func(secretProvider) string{
+		"ENDPOINT":      func(p secretProvider) string { return p.Endpoint },
+		"TOKEN":         func(p secretProvider) string { return p.Credentials.Token },
+		"USERNAME":      func(p secretProvider) string { return p.Credentials.Username },
+		"PASSWORD":      func(p secretProvider) string { return p.Credentials.Password },
+		"CLIENT_ID":     func(p secretProvider) string { return p.Credentials.ClientID },
+		"CLIENT_SECRET": func(p secretProvider) string { return p.Credentials.ClientSecret },
+		"NAMESPACE":     func(p secretProvider) string { return p.Credentials.Namespace },
+		"CLIENT_CERT":   func(p secretProvider) string { return p.Credentials.ClientCert },
+		"CLIENT_KEY":    func(p secretProvider) string { return p.Credentials.ClientKey },
+		"CA_CERT":       func(p secretProvider) string { return p.Credentials.CACert },
+		"BASTION_HOST":  func(p secretProvider) string { return p.Bastion.Host },
+		"BASTION_USER":  func(p secretProvider) string { return p.Bastion.User },
+		"BASTION_KEY":   func(p secretProvider) string { return p.Bastion.Key },
+	} {
+		t.Run(key, func(t *testing.T) {
+			t.Setenv("VAULT_HASHICORP_"+key, "set")
+			overlaid, err := envOverlay(secretProvider{Provider: "vault"})
+			if err != nil {
+				t.Fatalf("envOverlay: %v", err)
+			}
+			if got := read(overlaid); got != "set" {
+				t.Errorf("VAULT_HASHICORP_%s=set left the field %q", key, got)
+			}
+		})
 	}
+
+	// The one non-string field: reflection could never set it, so a bastion
+	// configured entirely from the environment silently used 22.
+	t.Run("BASTION_PORT", func(t *testing.T) {
+		t.Setenv("VAULT_HASHICORP_BASTION_PORT", "2222")
+		overlaid, err := envOverlay(secretProvider{Provider: "vault"})
+		if err != nil || overlaid.Bastion.Port != 2222 {
+			t.Fatalf("port = %d, err = %v; want 2222", overlaid.Bastion.Port, err)
+		}
+	})
+
+	t.Run("BASTION_PORT rejects a non-number", func(t *testing.T) {
+		t.Setenv("VAULT_HASHICORP_BASTION_PORT", "22a")
+		if _, err := envOverlay(secretProvider{Provider: "vault"}); err == nil {
+			t.Error("a mistyped port must fail loudly, not fall back to 22")
+		}
+	})
 }

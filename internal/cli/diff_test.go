@@ -118,9 +118,6 @@ func TestDiffArgumentErrors(t *testing.T) {
 		{"bad format",
 			[]string{"diff", "-o", "xml", "-f", asset("app-dev.yaml"), "-f", asset("app-prod.yaml")},
 			"Invalid format"},
-		{"bad query",
-			[]string{"diff", "-q", "[?kind==", "-f", asset("app-dev.yaml"), "-f", asset("app-prod.yaml")},
-			"invalid JMESPath"},
 	}
 
 	for _, tc := range cases {
@@ -136,19 +133,6 @@ func TestDiffArgumentErrors(t *testing.T) {
 	}
 }
 
-func TestDiffPrintSchema(t *testing.T) {
-	stdout, _, code := runCu(t, "diff", "--print-schema")
-	if code != 0 {
-		t.Fatalf("exit code = %d, want 0", code)
-	}
-	for _, want := range []string{"diffs", "global_ignore_patterns", "format"} {
-		if !strings.Contains(stdout, want) {
-			t.Errorf("schema is missing %q", want)
-		}
-	}
-}
-
-// Config files resolve their file paths relative to the config's own directory.
 func TestDiffConfigMode(t *testing.T) {
 	stdout, stderr, code := runCu(t, "diff", "--config", asset("cu_diff.yml"), "-o", "json")
 	if code != 1 {

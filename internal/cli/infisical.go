@@ -25,23 +25,19 @@ import (
 type infisicalClient struct {
 	endpoint string
 	token    string
-	// httpClient is nil unless the profile configures mTLS or a bastion.
+	// httpClient is the profile's own only when mTLS or a bastion needs one.
 	httpClient *http.Client
 }
 
 func newInfisicalClient(ctx context.Context, p secretProvider) (secretStore, error) {
-	endpoint, serverName, err := bastionEndpoint(ctx, p)
-	if err != nil {
-		return nil, err
-	}
-	tlsClient, err := httpClientFor(p, serverName)
+	endpoint, httpClient, err := dialProfile(ctx, p)
 	if err != nil {
 		return nil, err
 	}
 	client := &infisicalClient{
-		endpoint:   strings.TrimRight(endpoint, "/"),
+		endpoint:   endpoint,
 		token:      p.Credentials.Token,
-		httpClient: tlsClient,
+		httpClient: httpClient,
 	}
 	if client.token != "" {
 		return client, nil

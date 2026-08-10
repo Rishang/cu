@@ -9,16 +9,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 )
 
-// Secret is one Secrets Manager entry.
-type Secret struct {
-	Name  string
-	Value string
-}
-
 // ListSecrets returns secret names, optionally filtered by name prefix.
 func ListSecrets(ctx context.Context, cfg aws.Config, nameFilter string) ([]string, error) {
 	client := secretsmanager.NewFromConfig(cfg)
-	input := &secretsmanager.ListSecretsInput{MaxResults: aws.Int32(100)}
+	input := &secretsmanager.ListSecretsInput{}
 	if nameFilter != "" {
 		input.Filters = []smtypes.Filter{{
 			Key:    smtypes.FilterNameStringTypeName,
@@ -40,19 +34,16 @@ func ListSecrets(ctx context.Context, cfg aws.Config, nameFilter string) ([]stri
 	return names, nil
 }
 
-// GetSecret fetches a secret's current value. GetSecretValue already returns the
-// resolved name, so there is no DescribeSecret call and no secretsmanager:DescribeSecret
-// permission to grant.
-func GetSecret(ctx context.Context, cfg aws.Config, id string) (Secret, error) {
+// GetSecret fetches a secret's current value along with its resolved name.
+// GetSecretValue already returns that name, so there is no DescribeSecret call
+// and no secretsmanager:DescribeSecret permission to grant.
+func GetSecret(ctx context.Context, cfg aws.Config, id string) (name, value string, err error) {
 	out, err := secretsmanager.NewFromConfig(cfg).GetSecretValue(ctx,
 		&secretsmanager.GetSecretValueInput{SecretId: aws.String(id)})
 	if err != nil {
-		return Secret{}, err
+		return "", "", err
 	}
-	return Secret{
-		Name:  aws.ToString(out.Name),
-		Value: aws.ToString(out.SecretString),
-	}, nil
+	return aws.ToString(out.Name), aws.ToString(out.SecretString), nil
 }
 
 // DecodeAuthorizationMessage expands an encoded STS authorization failure message.

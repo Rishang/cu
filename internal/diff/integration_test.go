@@ -117,29 +117,13 @@ func TestCrossFormatComparison(t *testing.T) {
 func TestQueryAgainstRealDiff(t *testing.T) {
 	entries := Compute(loadAsset(t, "sparse.json"), loadAsset(t, "config-a.json"))
 
-	byPrefix, err := Query(entries, "database")
-	if err != nil {
-		t.Fatalf("Query: %v", err)
-	}
+	byPrefix := Query(entries, "database")
 	if len(byPrefix) == 0 {
 		t.Fatal("prefix query returned nothing")
 	}
 	for _, e := range byPrefix {
 		if !strings.HasPrefix(e.PathStr(), "database") {
 			t.Errorf("prefix query leaked %q", e.PathStr())
-		}
-	}
-
-	added, err := Query(entries, "[?kind=='added']")
-	if err != nil {
-		t.Fatalf("Query: %v", err)
-	}
-	if len(added) == 0 {
-		t.Fatal("JMESPath query returned nothing")
-	}
-	for _, e := range added {
-		if e.Kind != KindAdded {
-			t.Errorf("expected only added entries, got %s", e.Kind)
 		}
 	}
 }

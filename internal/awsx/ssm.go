@@ -16,15 +16,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 )
 
-// portForwardDocument is the SSM document used for tunneling to a remote host.
-const portForwardDocument = "AWS-StartPortForwardingSessionToRemoteHost"
-
-// Parameter is one SSM Parameter Store entry.
-type Parameter struct {
-	Name  string
-	Value string
-}
-
 // ListParameters returns every parameter name under prefix.
 func ListParameters(ctx context.Context, cfg aws.Config, prefix string) ([]string, error) {
 	client := ssm.NewFromConfig(cfg)
@@ -48,20 +39,18 @@ func ListParameters(ctx context.Context, cfg aws.Config, prefix string) ([]strin
 	return names, nil
 }
 
-// GetParameter fetches one decrypted parameter.
-func GetParameter(ctx context.Context, cfg aws.Config, name string) (Parameter, error) {
+// GetParameter fetches one decrypted parameter, with the name the store
+// resolved it to.
+func GetParameter(ctx context.Context, cfg aws.Config, id string) (name, value string, err error) {
 	client := ssm.NewFromConfig(cfg)
 	out, err := client.GetParameter(ctx, &ssm.GetParameterInput{
-		Name:           aws.String(name),
+		Name:           aws.String(id),
 		WithDecryption: aws.Bool(true),
 	})
 	if err != nil {
-		return Parameter{}, err
+		return "", "", err
 	}
-	return Parameter{
-		Name:  aws.ToString(out.Parameter.Name),
-		Value: aws.ToString(out.Parameter.Value),
-	}, nil
+	return aws.ToString(out.Parameter.Name), aws.ToString(out.Parameter.Value), nil
 }
 
 // Instance is a running EC2 instance reachable through SSM.
@@ -138,7 +127,7 @@ func StartSession(ctx context.Context, cfg aws.Config, instanceID string, t Tunn
 		if t.RemoteHost == "" || t.RemotePort == 0 || t.LocalPort == 0 {
 			return errors.New("--remote-host, --remote-port and --local-port are all required for tunneling")
 		}
-		input.DocumentName = aws.String(portForwardDocument)
+		input.DocumentName = aws.String("AWS-StartPortForwardingSessionToRemoteHost")
 		input.Parameters = map[string][]string{
 			"host":            {t.RemoteHost},
 			"portNumber":      {strconv.Itoa(t.RemotePort)},

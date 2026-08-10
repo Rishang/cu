@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"io"
@@ -12,44 +13,30 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// bastionTunnel is a live SSH port-forward opened for one profile: every
-// connection accepted on its local listener is forwarded, through the
-// bastion, to the address it was opened for.
-//
-// It is never closed explicitly. cu is a one-shot process per command, so the
-// listener and SSH connection die with it; a long-running daemon reusing this
-// would need to track and close them instead.
-type bastionTunnel struct {
-	listener net.Listener
-	client   *ssh.Client
-}
-
-// Addr is the local address a client should connect to instead of the real
-// endpoint.
-func (t *bastionTunnel) Addr() string { return t.listener.Addr().String() }
-
 // dialBastion opens an SSH connection to the profile's bastion and starts a
 // local listener that forwards each accepted connection to remoteAddr through
-// it. b.Host == "" is not this function's contract to check; callers use
-// bastionEndpoint for the common "no bastion configured" case.
-func dialBastion(ctx context.Context, p secretProvider, remoteAddr string) (*bastionTunnel, error) {
+// it, returning the local address to dial in place of the real one. b.Host ==
+// "" is not this function's contract to check; callers use bastionEndpoint for
+// the common "no bastion configured" case.
+//
+// Nothing is closed explicitly. cu is a one-shot process per command, so the
+// listener and SSH connection die with it; a long-running daemon reusing this
+// would need to track and close them instead.
+func dialBastion(ctx context.Context, p secretProvider, remoteAddr string) (string, error) {
 	b := p.Bastion
 	if b.User == "" || b.Key == "" {
-		return nil, fmt.Errorf("profile %q needs bastion.user and bastion.key", p.Profile)
+		return "", fmt.Errorf("profile %q needs bastion.user and bastion.key", p.Profile)
 	}
 	keyPEM, err := os.ReadFile(b.Key)
 	if err != nil {
-		return nil, fmt.Errorf("reading bastion.key: %w", err)
+		return "", fmt.Errorf("reading bastion.key: %w", err)
 	}
 	signer, err := ssh.ParsePrivateKey(keyPEM)
 	if err != nil {
-		return nil, fmt.Errorf("parsing bastion.key: %w", err)
+		return "", fmt.Errorf("parsing bastion.key: %w", err)
 	}
 
-	port := b.Port
-	if port == 0 {
-		port = 22
-	}
+	port := cmp.Or(b.Port, 22)
 	config := &ssh.ClientConfig{
 		User: b.User,
 		Auth: []ssh.AuthMethod{ssh.PublicKeys(signer)},
@@ -62,21 +49,21 @@ func dialBastion(ctx context.Context, p secretProvider, remoteAddr string) (*bas
 	dialer := &net.Dialer{}
 	conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(b.Host, strconv.Itoa(port)))
 	if err != nil {
-		return nil, fmt.Errorf("dialing bastion %s: %w", b.Host, err)
+		return "", fmt.Errorf("dialing bastion %s: %w", b.Host, err)
 	}
 	sshConn, chans, reqs, err := ssh.NewClientConn(conn, conn.RemoteAddr().String(), config)
 	if err != nil {
-		return nil, fmt.Errorf("bastion handshake with %s: %w", b.Host, err)
+		return "", fmt.Errorf("bastion handshake with %s: %w", b.Host, err)
 	}
 	client := ssh.NewClient(sshConn, chans, reqs)
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		client.Close()
-		return nil, err
+		return "", err
 	}
 	go acceptAndForward(listener, client, remoteAddr)
-	return &bastionTunnel{listener: listener, client: client}, nil
+	return listener.Addr().String(), nil
 }
 
 // acceptAndForward pairs every connection the local listener accepts with a
@@ -117,16 +104,14 @@ func bastionEndpoint(ctx context.Context, p secretProvider) (endpoint, serverNam
 	if err != nil {
 		return "", "", fmt.Errorf("profile %q has an invalid endpoint: %w", p.Profile, err)
 	}
-	remoteHost, remotePort := target.Hostname(), target.Port()
-	if remotePort == "" {
-		remotePort = defaultPort(target.Scheme)
-	}
+	remoteHost := target.Hostname()
+	remotePort := cmp.Or(target.Port(), defaultPort(target.Scheme))
 
-	tunnel, err := dialBastion(ctx, p, net.JoinHostPort(remoteHost, remotePort))
+	local, err := dialBastion(ctx, p, net.JoinHostPort(remoteHost, remotePort))
 	if err != nil {
 		return "", "", err
 	}
-	target.Host = tunnel.Addr()
+	target.Host = local
 	return target.String(), remoteHost, nil
 }
 

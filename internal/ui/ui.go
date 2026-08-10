@@ -85,15 +85,13 @@ func ColorEnabled() bool { return colorEnabled }
 
 var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
-// TextWidth returns the rendered column width of s, for callers doing their own
-// alignment. Not to be confused with width(), the terminal's width.
-func TextWidth(s string) int { return visibleWidth(s) }
-
 // StripANSI removes styling from s, leaving the text a terminal would show.
 func StripANSI(s string) string { return ansiPattern.ReplaceAllString(s, "") }
 
-// visibleWidth returns the rendered column width of s, ignoring escape codes.
-func visibleWidth(s string) int {
+// TextWidth returns the rendered column width of s, ignoring escape codes, for
+// callers doing their own alignment. Not to be confused with width(), which is
+// the terminal's.
+func TextWidth(s string) int {
 	return runewidth.StringWidth(ansiPattern.ReplaceAllString(s, ""))
 }
 
@@ -279,7 +277,7 @@ func Rule(title string, line Style) {
 	}
 
 	label := " " + title + " "
-	inner := visibleWidth(label)
+	inner := TextWidth(label)
 	if inner >= w {
 		Print(label)
 		return

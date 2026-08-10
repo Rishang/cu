@@ -52,10 +52,7 @@ func run(args ...string) ([]byte, error) {
 
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
-		detail := strings.TrimSpace(string(exitErr.Stderr))
-		if detail == "" {
-			detail = strings.TrimSpace(string(out))
-		}
+		detail := cmp.Or(strings.TrimSpace(string(exitErr.Stderr)), strings.TrimSpace(string(out)))
 		return nil, fmt.Errorf("kubectl %s failed: %s", strings.Join(args, " "), detail)
 	}
 	if errors.Is(err, exec.ErrNotFound) {
@@ -77,36 +74,23 @@ func runJSON[T any](args ...string) (T, error) {
 	return data, nil
 }
 
-// objectMeta is the part of a Kubernetes object's metadata cu reads.
+// objectMeta is the part of a Kubernetes object's metadata cu reads. Callers
+// mirror kubectl and read an empty Namespace as "default": the object came
+// from a request that had already scoped one.
 type objectMeta struct {
 	Name      string `json:"name"`
 	Namespace string `json:"namespace"`
 }
 
-// namespaceOrDefault mirrors kubectl: an object with no namespace in its JSON
-// came from a request that already scoped one, which is "default" by convention.
-func (m objectMeta) namespaceOrDefault() string {
-	if m.Namespace == "" {
-		return "default"
-	}
-	return m.Namespace
-}
-
-// runLines executes kubectl and returns its non-blank stdout lines. Paired with
-// `-o name` it replaces a JSON round trip for anything that is just a list of
-// names.
+// runLines executes kubectl and returns its non-blank stdout lines, for
+// queries that are just a list of names. Split on newlines only, not
+// strings.Fields: a context name may contain a space.
 func runLines(args ...string) ([]string, error) {
 	out, err := run(args...)
 	if err != nil {
 		return nil, err
 	}
-	var lines []string
-	for line := range strings.SplitSeq(string(out), "\n") {
-		if line = strings.TrimSpace(line); line != "" {
-			lines = append(lines, line)
-		}
-	}
-	return lines, nil
+	return strings.FieldsFunc(string(out), func(r rune) bool { return r == '\n' }), nil
 }
 
 // ListContexts returns context names from the current kubeconfig.
@@ -135,27 +119,12 @@ func CurrentNamespace() string {
 	return cmp.Or(configValue("config", "view", "--minify", "-o", "jsonpath={..namespace}"), "default")
 }
 
-// ListNamespaces returns every namespace name. The API returns them sorted and
+// ListNamespaces returns every namespace name. jsonpath rather than `-o name`,
+// which prefixes each line with "namespace/". The API returns them sorted and
 // names are unique, so there is nothing to sort or dedupe here.
 func ListNamespaces() ([]string, error) {
-	names, err := runLines("get", "namespaces", "-o", "name")
-	if err != nil {
-		return nil, err
-	}
-	for i, name := range names {
-		names[i] = strings.TrimPrefix(name, "namespace/")
-	}
-	return names, nil
-}
-
-// ListSecretKeys returns one entry per Secret data/stringData key.
-func ListSecretKeys(allNamespaces bool, namespace string) ([]KeyRef, error) {
-	return listKeys("secrets", allNamespaces, namespace)
-}
-
-// ListConfigMapKeys returns one entry per ConfigMap data/binaryData key.
-func ListConfigMapKeys(allNamespaces bool, namespace string) ([]KeyRef, error) {
-	return listKeys("configmaps", allNamespaces, namespace)
+	return runLines("get", "namespaces", "-o",
+		`jsonpath={range .items[*]}{.metadata.name}{"\n"}{end}`)
 }
 
 // scopeArgs appends the namespace selector kubectl needs.
@@ -169,17 +138,18 @@ func scopeArgs(args []string, allNamespaces bool, namespace string) []string {
 	return args
 }
 
-// keyedItem covers Secrets and ConfigMaps alike: a Secret carries data and
-// stringData, a ConfigMap data and binaryData. Listing unions the three, and
-// deduplicates because a key can appear in more than one of them.
+// keyedItem covers Secrets and ConfigMaps alike: both carry data, and a
+// ConfigMap also binaryData. A Secret's stringData is not here because it is
+// write-only — the API server folds it into data and never returns it.
 type keyedItem struct {
 	Metadata   objectMeta        `json:"metadata"`
 	Data       map[string]string `json:"data"`
-	StringData map[string]string `json:"stringData"`
 	BinaryData map[string]string `json:"binaryData"`
 }
 
-func listKeys(resource string, allNamespaces bool, namespace string) ([]KeyRef, error) {
+// ListKeys returns one entry per data key of every Secret or ConfigMap in
+// scope; resource is what kubectl calls them.
+func ListKeys(resource string, allNamespaces bool, namespace string) ([]KeyRef, error) {
 	args := scopeArgs([]string{"get", resource, "-o", "json"}, allNamespaces, namespace)
 
 	list, err := runJSON[struct{ Items []keyedItem }](args...)
@@ -193,14 +163,14 @@ func listKeys(resource string, allNamespaces bool, namespace string) ([]KeyRef, 
 			continue
 		}
 		unique := map[string]struct{}{}
-		for _, data := range []map[string]string{item.Data, item.StringData, item.BinaryData} {
+		for _, data := range []map[string]string{item.Data, item.BinaryData} {
 			for key := range data {
 				unique[key] = struct{}{}
 			}
 		}
 		for _, key := range slices.Sorted(maps.Keys(unique)) {
 			refs = append(refs, KeyRef{
-				Namespace: item.Metadata.namespaceOrDefault(),
+				Namespace: cmp.Or(item.Metadata.Namespace, "default"),
 				Name:      item.Metadata.Name,
 				Key:       key,
 			})
@@ -221,9 +191,6 @@ func SecretValue(ref KeyRef) (string, error) {
 			return fmt.Sprintf("<b64-decode-error> raw=%q", encoded), nil
 		}
 		return string(decoded), nil
-	}
-	if value, ok := secret.StringData[ref.Key]; ok {
-		return value, nil
 	}
 	return "<key not found>", nil
 }
@@ -289,12 +256,9 @@ func parsePods(list podList) []Pod {
 			continue
 		}
 		pod := Pod{
-			Namespace: item.Metadata.namespaceOrDefault(),
+			Namespace: cmp.Or(item.Metadata.Namespace, "default"),
 			Name:      item.Metadata.Name,
-			Phase:     item.Status.Phase,
-		}
-		if pod.Phase == "" {
-			pod.Phase = "Unknown"
+			Phase:     cmp.Or(item.Status.Phase, "Unknown"),
 		}
 		for _, c := range slices.Concat(item.Spec.InitContainers, item.Spec.Containers) {
 			if c.Name != "" {

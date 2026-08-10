@@ -216,51 +216,9 @@ func TestQueryPathPrefix(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.query, func(t *testing.T) {
-			got, err := Query(entries, tc.query)
-			if err != nil {
-				t.Fatalf("Query: %v", err)
-			}
-			assertPaths(t, got, tc.want)
+			assertPaths(t, Query(entries, tc.query), tc.want)
 		})
 	}
-}
-
-func TestQueryJMESPath(t *testing.T) {
-	entries := []Entry{
-		changed([]any{"spec", "replicas"}, int64(1), int64(2)),
-		entry([]any{"spec", "extra"}, KindAdded, nil, "new"),
-		entry([]any{"spec", "gone"}, KindRemoved, "old", nil),
-		changed([]any{"image"}, "t2.micro", "t3.small"),
-	}
-
-	cases := []struct {
-		name  string
-		query string
-		want  []string
-	}{
-		{"by kind", "[?kind=='changed']", []string{"image", "spec.replicas"}},
-		{"negated kind", "[?kind!='changed']", []string{"spec.extra", "spec.gone"}},
-		{"contains on path", "[?contains(path, 'spec')]",
-			[]string{"spec.extra", "spec.gone", "spec.replicas"}},
-		{"exact path", "[?path=='image']", []string{"image"}},
-		{"by old value", "[?old=='t2.micro']", []string{"image"}},
-		{"matches nothing", "[?kind=='nonexistent']", nil},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := Query(entries, tc.query)
-			if err != nil {
-				t.Fatalf("Query: %v", err)
-			}
-			assertPaths(t, got, tc.want)
-		})
-	}
-}
-
-func TestQueryInvalidExpression(t *testing.T) {
-	_, err := Query([]Entry{changed([]any{"a"}, 1, 2)}, "[?kind==")
-	assertErrContains(t, err, "invalid JMESPath query")
 }
 
 func assertPaths(t *testing.T, entries []Entry, want []string) {
@@ -285,22 +243,5 @@ func TestSortByPathDoesNotMutateInput(t *testing.T) {
 	}
 	if sorted[0].PathStr() != "a" {
 		t.Errorf("output not sorted: %v", keptPaths(sorted))
-	}
-}
-
-// A projection returns rows the filter cannot map back to entries; keeping
-// nothing would print as "no differences".
-func TestQueryRejectsNonEntryResults(t *testing.T) {
-	entries := []Entry{{Path: []any{"spec", "replicas"}, Kind: KindChanged, Old: int64(2), New: int64(3)}}
-	for _, q := range []string{"[].path", "[?kind=='changed'].path"} {
-		if _, err := Query(entries, q); err == nil {
-			t.Errorf("Query(%q) succeeded, want an error explaining the shape", q)
-		}
-	}
-	if got, err := Query(entries, "[?kind=='changed']"); err != nil || len(got) != 1 {
-		t.Errorf("Query kept %d entries, err %v", len(got), err)
-	}
-	if got, err := Query(entries, "[?kind=='added']"); err != nil || len(got) != 0 {
-		t.Errorf("no-match query: kept %d, err %v", len(got), err)
 	}
 }

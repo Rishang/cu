@@ -3,10 +3,6 @@ package cli
 
 import (
 	"fmt"
-	"io"
-	"maps"
-	"slices"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -104,48 +100,5 @@ func NewRootCommand() *cobra.Command {
 		newJSON2YAMLCommand(),
 		newYAML2JSONCommand(),
 	)
-	// Ours replaces the generated one; see newCompletionCommand.
-	root.CompletionOptions.DisableDefaultCmd = true
-	root.AddCommand(newCompletionCommand())
 	return root
-}
-
-// completionShells maps a shell name to its generator.
-var completionShells = map[string]func(root *cobra.Command, w io.Writer) error{
-	"bash":       func(root *cobra.Command, w io.Writer) error { return root.GenBashCompletionV2(w, true) },
-	"zsh":        func(root *cobra.Command, w io.Writer) error { return root.GenZshCompletion(w) },
-	"fish":       func(root *cobra.Command, w io.Writer) error { return root.GenFishCompletion(w, true) },
-	"powershell": func(root *cobra.Command, w io.Writer) error { return root.GenPowerShellCompletionWithDesc(w) },
-}
-
-// newCompletionCommand replaces the one cobra generates, for two reasons: its
-// help explains what the script is but never how to install it, and it captures
-// the output writer when the tree is built rather than when the command runs.
-// This one resolves the writer per run, so callers can redirect it.
-func newCompletionCommand() *cobra.Command {
-	shells := slices.Sorted(maps.Keys(completionShells))
-
-	return &cobra.Command{
-		Use:   "completion <" + strings.Join(shells, "|") + ">",
-		Short: "Generate the shell completion script — see --help to install it",
-		Long: fmt.Sprintf(`Generate the shell completion script for %[1]s.
-
-Add one line to your shell's rc file:
-
-  # ~/.bashrc
-  eval "$(%[1]s completion bash)"
-
-  # ~/.zshrc — after 'autoload -U compinit && compinit'
-  eval "$(%[1]s completion zsh)"
-
-  # ~/.config/fish/config.fish
-  %[1]s completion fish | source
-
-Then restart your shell.`, rootName),
-		ValidArgs: shells,
-		Args:      cobra.MatchAll(cobra.ExactArgs(1), cobra.OnlyValidArgs),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return completionShells[args[0]](cmd.Root(), cmd.OutOrStdout())
-		},
-	}
 }

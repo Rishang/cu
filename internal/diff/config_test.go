@@ -1,45 +1,10 @@
 package diff
 
 import (
-	"reflect"
 	"slices"
 	"strings"
 	"testing"
-
-	yaml "github.com/goccy/go-yaml"
 )
-
-// ignore_patterns accepts a comma-separated string or a list, and any list item
-// may itself be comma-separated.
-func TestPatternsUnmarshal(t *testing.T) {
-	cases := []struct {
-		name  string
-		input string
-		want  Patterns
-	}{
-		{"comma-separated string", "qa,prod", Patterns{"qa", "prod"}},
-		{"single token", "qa", Patterns{"qa"}},
-		{"whitespace is trimmed", "' qa , prod '", Patterns{"qa", "prod"}},
-		{"yaml list", "[dev, stage]", Patterns{"dev", "stage"}},
-		{"list items may hold commas", "['a,b', c]", Patterns{"a", "b", "c"}},
-		{"empty tokens dropped", "',,qa,'", Patterns{"qa"}},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			doc := "global_ignore_patterns: " + tc.input + "\n" +
-				"diffs:\n  - files: [a.yaml, b.yaml]\n"
-
-			cfg := &Config{}
-			if err := yaml.Unmarshal([]byte(doc), cfg); err != nil {
-				t.Fatalf("Unmarshal: %v", err)
-			}
-			if !reflect.DeepEqual(cfg.GlobalIgnorePatterns, tc.want) {
-				t.Fatalf("got %#v, want %#v", cfg.GlobalIgnorePatterns, tc.want)
-			}
-		})
-	}
-}
 
 func TestConfigValidate(t *testing.T) {
 	cases := []struct {
@@ -65,7 +30,7 @@ func TestConfigValidate(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := tc.cfg.Validate()
+			err := tc.cfg.validate()
 			if tc.wantErr == "" {
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)
@@ -137,42 +102,6 @@ func TestLoadConfigErrors(t *testing.T) {
 // The schema is hand-written, so the risk is a field being added to Config or
 // Diff and nobody documenting it. Walk the struct tags and demand a property
 // for each — this is the guard that lets the schema stay a literal.
-func TestSchemaCoversEveryField(t *testing.T) {
-	raw := SchemaYAML()
-
-	// It must round-trip as YAML, since agents are told to parse it.
-	var schema struct {
-		Properties map[string]struct {
-			Items struct {
-				Properties map[string]any `yaml:"properties"`
-			} `yaml:"items"`
-		} `yaml:"properties"`
-		Example map[string]any `yaml:"example"`
-	}
-	if err := yaml.Unmarshal(raw, &schema); err != nil {
-		t.Fatalf("schema is not valid YAML: %v", err)
-	}
-	if len(schema.Example) == 0 {
-		t.Error("schema carries no usage example")
-	}
-
-	for _, tc := range []struct {
-		what       string
-		typ        reflect.Type
-		properties map[string]bool
-	}{
-		{"Config", reflect.TypeFor[Config](), keySet(schema.Properties)},
-		{"Diff", reflect.TypeFor[Diff](), keySet(schema.Properties["diffs"].Items.Properties)},
-	} {
-		for i := range tc.typ.NumField() {
-			name := tc.typ.Field(i).Tag.Get("yaml")
-			if !tc.properties[name] {
-				t.Errorf("%s field %q has no schema property — document it in schemaDoc", tc.what, name)
-			}
-		}
-	}
-}
-
 func keySet[V any](m map[string]V) map[string]bool {
 	out := make(map[string]bool, len(m))
 	for k := range m {

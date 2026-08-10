@@ -9,14 +9,11 @@ import (
 )
 
 // LoadConfig resolves AWS credentials, honoring optional profile and region
-// overrides and otherwise falling back to the usual environment and config files.
+// overrides and otherwise falling back to the usual environment and config
+// files. An empty override is not a value: the SDK's own getRegion and
+// getSharedConfigProfile skip it and carry on down the chain.
 func LoadConfig(ctx context.Context, profile, region string) (aws.Config, error) {
-	var opts []func(*config.LoadOptions) error
-	if profile != "" {
-		opts = append(opts, config.WithSharedConfigProfile(profile))
-	}
-	if region != "" {
-		opts = append(opts, config.WithRegion(region))
-	}
-	return config.LoadDefaultConfig(ctx, opts...)
+	return config.LoadDefaultConfig(ctx,
+		config.WithSharedConfigProfile(profile),
+		config.WithRegion(region))
 }

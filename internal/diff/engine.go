@@ -103,13 +103,10 @@ func diffValues(a, b any, path []any) []Entry {
 		if numEqual(a, b) {
 			return nil
 		}
-	case kindNil, kindBool, kindStr:
-		if a == b {
-			return nil
-		}
 	default:
-		// DeepEqual rather than ==: kindOther covers whatever a parser hands
-		// back (go-toml dates, say), and == panics on uncomparable types.
+		// DeepEqual rather than ==: nil, bool and string it answers the same
+		// way, and kindOther covers whatever a parser hands back (go-toml
+		// dates, say), where == would panic on an uncomparable type.
 		if reflect.DeepEqual(a, b) {
 			return nil
 		}
@@ -119,10 +116,11 @@ func diffValues(a, b any, path []any) []Entry {
 
 func diffMaps(a, b map[string]any, path []any) []Entry {
 	union := make(map[string]struct{}, len(a)+len(b))
-	for _, m := range []map[string]any{a, b} {
-		for k := range m {
-			union[k] = struct{}{}
-		}
+	for k := range a {
+		union[k] = struct{}{}
+	}
+	for k := range b {
+		union[k] = struct{}{}
 	}
 
 	var entries []Entry

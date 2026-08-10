@@ -1,6 +1,7 @@
 package kube
 
 import (
+	"cmp"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -68,10 +69,7 @@ func inCluster() bool {
 // token pasted into a config or an argv would go stale and be visible in ps.
 func writeInClusterKubeconfig() (string, error) {
 	host := os.Getenv("KUBERNETES_SERVICE_HOST")
-	port := os.Getenv("KUBERNETES_SERVICE_PORT")
-	if port == "" {
-		port = "443"
-	}
+	port := cmp.Or(os.Getenv("KUBERNETES_SERVICE_PORT"), "443")
 	// An IPv6 service host arrives bare and has to be bracketed in a URL.
 	if strings.Contains(host, ":") {
 		host = "[" + host + "]"

@@ -25,12 +25,19 @@ import (
 type infisicalClient struct {
 	endpoint string
 	token    string
+	// httpClient is nil unless the profile configures mTLS.
+	httpClient *http.Client
 }
 
 func newInfisicalClient(ctx context.Context, p secretProvider) (secretStore, error) {
+	tlsClient, err := mtlsClient(p)
+	if err != nil {
+		return nil, err
+	}
 	client := &infisicalClient{
-		endpoint: strings.TrimRight(p.Endpoint, "/"),
-		token:    p.Credentials.Token,
+		endpoint:   strings.TrimRight(p.Endpoint, "/"),
+		token:      p.Credentials.Token,
+		httpClient: tlsClient,
 	}
 	if client.token != "" {
 		return client, nil
@@ -217,5 +224,5 @@ func (c *infisicalClient) request(ctx context.Context, method, endpointPath stri
 	if c.token != "" {
 		headers["Authorization"] = "Bearer " + c.token
 	}
-	return apiRequest(ctx, method, c.endpoint+endpointPath, headers, body)
+	return apiRequest(ctx, c.httpClient, method, c.endpoint+endpointPath, headers, body)
 }

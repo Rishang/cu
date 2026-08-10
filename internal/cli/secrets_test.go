@@ -199,6 +199,43 @@ vault:
 	}
 }
 
+// TestMTLSClient pins mtlsClient's contract: no cert/CA configured means "use
+// the shared httpClient", and a half-set or unreadable cert is an error
+// rather than a silently plaintext connection.
+func TestMTLSClient(t *testing.T) {
+	dir := t.TempDir()
+	certPath := filepath.Join(dir, "client.pem")
+	os.WriteFile(certPath, []byte("not a real cert"), 0o600)
+
+	cases := []struct {
+		name    string
+		creds   func() (clientCert, clientKey, caCert string)
+		wantErr bool
+	}{
+		{"no mTLS fields set", func() (string, string, string) { return "", "", "" }, false},
+		{"client_cert without client_key", func() (string, string, string) { return certPath, "", "" }, true},
+		{"unparsable client_cert", func() (string, string, string) { return certPath, certPath, "" }, true},
+		{"missing ca_cert", func() (string, string, string) { return "", "", filepath.Join(dir, "missing.pem") }, true},
+		{"non-PEM ca_cert", func() (string, string, string) { return "", "", certPath }, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := secretProvider{}
+			p.Credentials.ClientCert, p.Credentials.ClientKey, p.Credentials.CACert = tc.creds()
+			client, err := mtlsClient(p)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("mtlsClient(): want error, got nil")
+				}
+				return
+			}
+			if err != nil || client != nil {
+				t.Fatalf("mtlsClient() = %v, %v; want nil, nil", client, err)
+			}
+		})
+	}
+}
+
 // TestEnvKeysCoverCredentials pins the tag-derived naming: every credential
 // field is reachable from the environment, so adding one to secretProvider
 // cannot silently leave it file-only.

@@ -3,6 +3,8 @@ package cli
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -37,6 +39,13 @@ type secretProvider struct {
 		// Namespace is a Vault Enterprise namespace, or Infisical's
 		// organizationSlug — both name the tenant the credentials belong to.
 		Namespace string `yaml:"namespace"`
+		// ClientCert, ClientKey and CACert are all optional and enable mTLS:
+		// ClientCert/ClientKey are a PEM pair presented to the server, CACert
+		// a PEM bundle to verify the server against, for a private CA. Plain
+		// TLS (no client cert, system CA pool) works with none of them set.
+		ClientCert string `yaml:"client_cert"`
+		ClientKey  string `yaml:"client_key"`
+		CACert     string `yaml:"ca_cert"`
 	} `yaml:"credentials"`
 }
 
@@ -337,10 +346,52 @@ func idleTransport() *http.Transport {
 	return t
 }
 
+// mtlsClient builds a dedicated http.Client when a profile's credentials
+// configure mTLS, since a client cert is per-profile and can't be shared
+// through the package-wide httpClient. Returns nil when none are set, so the
+// caller falls back to httpClient.
+func mtlsClient(p secretProvider) (*http.Client, error) {
+	creds := p.Credentials
+	if creds.ClientCert == "" && creds.CACert == "" {
+		return nil, nil
+	}
+
+	tlsConfig := &tls.Config{}
+	if creds.ClientCert != "" {
+		if creds.ClientKey == "" {
+			return nil, fmt.Errorf("profile %q sets client_cert without client_key", p.Profile)
+		}
+		cert, err := tls.LoadX509KeyPair(creds.ClientCert, creds.ClientKey)
+		if err != nil {
+			return nil, fmt.Errorf("loading client_cert/client_key: %w", err)
+		}
+		tlsConfig.Certificates = []tls.Certificate{cert}
+	}
+	if creds.CACert != "" {
+		pem, err := os.ReadFile(creds.CACert)
+		if err != nil {
+			return nil, fmt.Errorf("reading ca_cert: %w", err)
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(pem) {
+			return nil, fmt.Errorf("ca_cert %q has no usable certificates", creds.CACert)
+		}
+		tlsConfig.RootCAs = pool
+	}
+
+	transport := idleTransport()
+	transport.TLSClientConfig = tlsConfig
+	return &http.Client{Transport: transport}, nil
+}
+
 // apiRequest performs a JSON API call and returns the response body. Both
 // backends talk plain REST, so they share one round-tripper; headers is what
-// distinguishes them.
-func apiRequest(ctx context.Context, method, url string, headers map[string]string, body []byte) ([]byte, error) {
+// distinguishes them. client is nil for the common case and falls back to
+// httpClient; a profile configuring mTLS passes its own.
+func apiRequest(ctx context.Context, client *http.Client, method, url string, headers map[string]string, body []byte) ([]byte, error) {
+	if client == nil {
+		client = httpClient
+	}
 	// The client has no timeout of its own, so a black-holed endpoint would
 	// hang the command forever. Per call, since a walk makes many.
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)

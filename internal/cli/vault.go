@@ -21,13 +21,20 @@ type vaultClient struct {
 	endpoint  string
 	token     string
 	namespace string
+	// httpClient is nil unless the profile configures mTLS.
+	httpClient *http.Client
 }
 
 func newVaultClient(ctx context.Context, p secretProvider) (secretStore, error) {
+	tlsClient, err := mtlsClient(p)
+	if err != nil {
+		return nil, err
+	}
 	client := &vaultClient{
-		endpoint:  strings.TrimRight(p.Endpoint, "/"),
-		token:     p.Credentials.Token,
-		namespace: p.Credentials.Namespace,
+		endpoint:   strings.TrimRight(p.Endpoint, "/"),
+		token:      p.Credentials.Token,
+		namespace:  p.Credentials.Namespace,
+		httpClient: tlsClient,
 	}
 	if client.token != "" {
 		return client, nil
@@ -246,7 +253,7 @@ func (c *vaultClient) kvPath(mount, verb, secretPath string) string {
 }
 
 func (c *vaultClient) request(ctx context.Context, method, path string, body []byte) ([]byte, error) {
-	return apiRequest(ctx, method, c.endpoint+path, map[string]string{
+	return apiRequest(ctx, c.httpClient, method, c.endpoint+path, map[string]string{
 		"X-Vault-Token":     c.token,
 		"X-Vault-Namespace": c.namespace,
 	}, body)

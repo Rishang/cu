@@ -325,6 +325,9 @@ vault:
       username: ""
       password: ""
       namespace: default        # Vault Enterprise namespace; omit on OSS
+      client_cert: /etc/vault/client.pem      # optional
+      client_key: /etc/vault/client-key.pem   # optional
+      ca_cert: /etc/vault/ca.pem              # optional
 
   - profile: inf-prod
     provider: infisical
@@ -337,6 +340,11 @@ vault:
       client_secret: 4c2b...
       namespace: my-org         # organizationSlug; only for sub-organizations
 ```
+
+`client_cert`/`client_key`/`ca_cert` work the same for both providers, since
+they set up the HTTP client rather than anything provider-specific: a client
+cert without its key (or vice versa) is a config error, not a plaintext
+fallback.
 
 Keep it owner-readable only: `chmod 600 ~/.config/cu/config.yml`.
 

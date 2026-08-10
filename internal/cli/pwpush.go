@@ -332,5 +332,5 @@ func newPwgenCommand() *cobra.Command {
 
 // pwpushRequest performs an authenticated API call and returns the response body.
 func pwpushRequest(ctx context.Context, method string, cfg *pwpushConfig, path string, body []byte) ([]byte, error) {
-	return apiRequest(ctx, method, cfg.Source+path, cfg.headers(), body)
+	return apiRequest(ctx, nil, method, cfg.Source+path, cfg.headers(), body)
 }

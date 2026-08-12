@@ -27,7 +27,10 @@ func fzfArgs(opts Options) []string {
 	// --ansi so a label can highlight itself, e.g. the active kube context.
 	// fzf strips the codes from what it returns, which is why Select indexes
 	// items by their stripped label.
-	args := []string{"--exact", "--ansi"}
+	// --no-mouse: hover alone was moving the selection, which reads as a
+	// misclick rather than a choice. Preview resize still works via the
+	// ctrl-o/ctrl-] binds below.
+	args := []string{"--exact", "--ansi", "--no-mouse"}
 	if opts.Multi {
 		args = append(args, "--multi")
 	}
@@ -39,14 +42,13 @@ func fzfArgs(opts Options) []string {
 			"--preview="+opts.Preview,
 			// One fixed position, no responsive alternative: fzf re-resolves a
 			// size threshold every frame, so a pane sitting near the boundary
-			// flips layout as you type. The border doubles as the drag handle
-			// for resizing, and mouse support is on by default.
+			// flips layout as you type.
 			"--preview-window=right,50%,wrap",
 			// A leading arrow on every continuation line is noisy for wrapped
 			// logs; indent them instead.
 			"--preview-wrap-sign=  ",
 			// The preview costs a subprocess per cursor move, so make it easy
-			// to get rid of, and give the mouseless a way to resize it.
+			// to get rid of, or resize it, without a mouse.
 			"--bind=ctrl-o:toggle-preview",
 			"--bind=ctrl-]:change-preview-window(right,75%|right,25%|right,50%)")
 	}

@@ -192,9 +192,9 @@ func TestRuleFitsTerminalWidth(t *testing.T) {
 	withColor(t, false)
 
 	var buf bytes.Buffer
-	prev := Err
-	Err = &buf
-	t.Cleanup(func() { Err = prev })
+	prev := Out
+	Out = &buf
+	t.Cleanup(func() { Out = prev })
 
 	Rule("PAIR 1/3", Cyan)
 	line := strings.TrimRight(buf.String(), "\n")

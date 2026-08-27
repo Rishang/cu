@@ -159,6 +159,21 @@ func TestDiffJSONGoesToStdoutOnly(t *testing.T) {
 	}
 }
 
+// cu diff -u must stay pipeable into grep, same as `diff`/`git diff`.
+func TestDiffUnifiedGoesToStdout(t *testing.T) {
+	stdout, stderr, code := runCu(t, "diff", "-o", "unified",
+		"-f", asset("app-dev.yaml"), "-f", asset("app-prod.yaml"))
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1 (the fixtures differ)", code)
+	}
+	if !strings.Contains(stdout, "@@") {
+		t.Errorf("unified diff did not reach stdout:\n%s", stdout)
+	}
+	if strings.Contains(stderr, "@@") {
+		t.Errorf("unified diff leaked into stderr:\n%s", stderr)
+	}
+}
+
 func TestDiffIgnoreFlags(t *testing.T) {
 	t.Run("--ignore-key suppresses a section", func(t *testing.T) {
 		stdout, _, _ := runCu(t, "diff", "-o", "json", "--ignore-key", "database",

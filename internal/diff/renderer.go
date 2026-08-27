@@ -21,8 +21,9 @@ type RenderOptions struct {
 	Ignored []Entry
 }
 
-// Render writes entries in the requested format. Table and unified output go to
-// stderr; JSON goes to stdout so it stays pipeable.
+// Render writes entries in the requested format. All formats write to stdout,
+// so the diff output — a command's actual data, same as `diff`/`git diff` —
+// stays pipeable into grep/jq/etc; status and errors still go to stderr.
 func Render(entries []Entry, o RenderOptions) {
 	switch o.Format {
 	case FormatJSON:
@@ -46,8 +47,8 @@ type renderLine struct {
 
 func renderUnified(entries []Entry, o RenderOptions) {
 	if len(entries) == 0 {
-		ui.Print("")
-		ui.Print(ui.BoldGreen.Render("✓  No differences"))
+		ui.PrintOut("")
+		ui.PrintOut(ui.BoldGreen.Render("✓  No differences"))
 		renderIgnored(o.Ignored)
 		return
 	}
@@ -65,8 +66,8 @@ func renderUnified(entries []Entry, o RenderOptions) {
 	for _, section := range slices.Sorted(maps.Keys(groups)) {
 		lines := buildLines(groups[section], section)
 		label := fmt.Sprintf("(%d change%s)", len(lines), plural(len(lines)))
-		ui.Print("")
-		ui.Printf("%s  %s", ui.BoldCyan.Sprintf("@@ %s @@", section), ui.Dim.Render(label))
+		ui.PrintOut("")
+		ui.PrintfOut("%s  %s", ui.BoldCyan.Sprintf("@@ %s @@", section), ui.Dim.Render(label))
 
 		pad := 0
 		for _, ln := range lines {
@@ -88,7 +89,7 @@ func renderUnified(entries []Entry, o RenderOptions) {
 	}
 
 	renderIgnored(o.Ignored)
-	ui.Print("")
+	ui.PrintOut("")
 	renderSummary(added, removed, changed)
 }
 
@@ -107,7 +108,7 @@ func printLine(ln renderLine, pad int) {
 	for _, seg := range ln.segs {
 		b.WriteString(seg.Style.Render(seg.Text))
 	}
-	ui.Print(b.String())
+	ui.PrintOut(b.String())
 }
 
 func buildLines(group []Entry, section string) []renderLine {
@@ -220,7 +221,7 @@ func expand(prefix string, value any) []keyValue {
 func renderTable(entries []Entry, o RenderOptions) {
 	if len(entries) == 0 {
 		renderIgnored(o.Ignored)
-		ui.Print(ui.BoldGreen.Render("✓  No differences"))
+		ui.PrintOut(ui.BoldGreen.Render("✓  No differences"))
 		return
 	}
 
@@ -275,8 +276,8 @@ func renderTable(entries []Entry, o RenderOptions) {
 	}
 
 	renderIgnored(o.Ignored)
-	table.Render(ui.Err)
-	ui.Print("")
+	table.Render(ui.Out)
+	ui.PrintOut("")
 	renderSummary(added, removed, changed)
 }
 
@@ -364,17 +365,17 @@ func renderIgnored(ignored []Entry) {
 	if len(ignored) == 0 {
 		return
 	}
-	ui.Print(ui.Dim.Sprintf("⊘  Ignored (%d) — matched ignore rules", len(ignored)))
+	ui.PrintOut(ui.Dim.Sprintf("⊘  Ignored (%d) — matched ignore rules", len(ignored)))
 	for _, e := range sortByPath(ignored) {
-		ui.Print(ui.Dim.Render("   ~ " + e.PathStr()))
+		ui.PrintOut(ui.Dim.Render("   ~ " + e.PathStr()))
 	}
-	ui.Print("")
+	ui.PrintOut("")
 }
 
 func renderSummary(added, removed, changed int) {
 	// One line, not a padded grid: %-Ns counts the escape codes a Style adds,
 	// so anything column-aligned here would come out crooked once colored.
-	ui.Printf("%s   %s   %s",
+	ui.PrintfOut("%s   %s   %s",
 		ui.BoldGreen.Sprintf("+  added %d", added),
 		ui.BoldRed.Sprintf("-  removed %d", removed),
 		ui.BoldYellow.Sprintf("~  changed %d", changed))

@@ -201,7 +201,7 @@ func diffPairs(paths, display []string, prefix string, rules diff.FilterRules, f
 			return 0, 0, err
 		}
 		total += count
-		ui.Print("")
+		ui.PrintOut("")
 	}
 	return total, len(combos), nil
 }
@@ -258,9 +258,9 @@ func printPairHeader(label, fileA, fileB, displayA, displayB string) {
 		return ""
 	}
 	ui.Rule(ui.Bold.Render(label), ui.Cyan)
-	ui.Printf("  %s  %s%s", ui.Red.Render("−"), ui.Cyan.Render(displayA), tag(fileA))
-	ui.Printf("  %s  %s%s", ui.Green.Render("+"), ui.Cyan.Render(displayB), tag(fileB))
-	ui.Print("")
+	ui.PrintfOut("  %s  %s%s", ui.Red.Render("−"), ui.Cyan.Render(displayA), tag(fileA))
+	ui.PrintfOut("  %s  %s%s", ui.Green.Render("+"), ui.Cyan.Render(displayB), tag(fileB))
+	ui.PrintOut("")
 }
 
 func printOverallSummary(total, pairs int) {

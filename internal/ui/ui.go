@@ -115,6 +115,13 @@ func Print(a ...any) { fmt.Fprintln(Err, a...) }
 // Printf writes formatted text to stderr, appending a newline.
 func Printf(format string, a ...any) { fmt.Fprintf(Err, format+"\n", a...) }
 
+// PrintOut writes a line to stdout, for commands whose human-readable
+// rendering (not just JSON) is the data, e.g. cu diff's unified/table output.
+func PrintOut(a ...any) { fmt.Fprintln(Out, a...) }
+
+// PrintfOut writes formatted text to stdout, appending a newline.
+func PrintfOut(format string, a ...any) { fmt.Fprintf(Out, format+"\n", a...) }
+
 // Info reports progress, e.g. "[*] Listing secrets".
 func Info(format string, a ...any) { Printf("[*] "+format, a...) }
 
@@ -267,22 +274,23 @@ func jsonQuote(s string) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// Rule draws a full-width horizontal rule with a centered title. The title is
+// Rule draws a full-width horizontal rule with a centered title, to stdout:
+// its only caller (cu diff) uses it to header the diff data. The title is
 // expected to be pre-styled; line styles the dashes.
 func Rule(title string, line Style) {
 	w := width()
 	if title == "" {
-		Print(line.Render(strings.Repeat("─", w)))
+		PrintOut(line.Render(strings.Repeat("─", w)))
 		return
 	}
 
 	label := " " + title + " "
 	inner := TextWidth(label)
 	if inner >= w {
-		Print(label)
+		PrintOut(label)
 		return
 	}
 	left := (w - inner) / 2
-	Print(line.Render(strings.Repeat("─", left)) + label +
+	PrintOut(line.Render(strings.Repeat("─", left)) + label +
 		line.Render(strings.Repeat("─", w-inner-left)))
 }

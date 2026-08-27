@@ -221,7 +221,7 @@ func TestRenderJSONEmptyDiffsIsArray(t *testing.T) {
 }
 
 func TestRenderTable(t *testing.T) {
-	_, stderr := capture(t)
+	stdout, _ := capture(t)
 
 	Render([]Entry{
 		changed([]any{"app", "version"}, "1.0.0", "2.0.0"),
@@ -229,7 +229,7 @@ func TestRenderTable(t *testing.T) {
 		entry([]any{"app", "old"}, KindRemoved, "gone", nil),
 	}, RenderOptions{Format: FormatTable, FileA: "a.yaml", FileB: "b.yaml"})
 
-	out := stderr.String()
+	out := stdout.String()
 	for _, want := range []string{
 		"Path", "a.yaml", "b.yaml",
 		"app.version", "'1.0.0'", "'2.0.0'",
@@ -243,16 +243,16 @@ func TestRenderTable(t *testing.T) {
 }
 
 func TestRenderTableNoDifferences(t *testing.T) {
-	_, stderr := capture(t)
+	stdout, _ := capture(t)
 	Render(nil, RenderOptions{Format: FormatTable, FileA: "a", FileB: "b"})
 
-	if !strings.Contains(stderr.String(), "No differences") {
-		t.Fatalf("got %q", stderr.String())
+	if !strings.Contains(stdout.String(), "No differences") {
+		t.Fatalf("got %q", stdout.String())
 	}
 }
 
 func TestRenderUnified(t *testing.T) {
-	_, stderr := capture(t)
+	stdout, _ := capture(t)
 
 	Render([]Entry{
 		changed([]any{"spec", "replicas"}, int64(1), int64(3)),
@@ -266,7 +266,7 @@ func TestRenderUnified(t *testing.T) {
 
 	// No file header here: cli.printPairHeader already names both files and
 	// their branches directly above this output.
-	out := stderr.String()
+	out := stdout.String()
 	for _, want := range []string{
 		"@@ spec @@", "@@ meta @@",
 		"replicas:", "1 → 3",
@@ -280,7 +280,7 @@ func TestRenderUnified(t *testing.T) {
 }
 
 func TestRenderIgnoredSection(t *testing.T) {
-	_, stderr := capture(t)
+	stdout, _ := capture(t)
 
 	Render([]Entry{changed([]any{"app", "replicas"}, int64(1), int64(2))},
 		RenderOptions{
@@ -291,7 +291,7 @@ func TestRenderIgnoredSection(t *testing.T) {
 			},
 		})
 
-	out := stderr.String()
+	out := stdout.String()
 	if !strings.Contains(out, "Ignored (2)") {
 		t.Errorf("missing the ignored count:\n%s", out)
 	}

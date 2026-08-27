@@ -819,6 +819,8 @@ cu diff -f a.yaml -f b.yaml --format json
 
 Exit code is `0` when no differences are found, `1` otherwise — suitable for CI pipelines.
 
+All formats write to stdout, so `cu diff -u | grep foo` and `cu diff | less` work the same as `diff`/`git diff`.
+
 #### Compare using a config file
 
 For multiple pairs, global ignore rules, or reusable queries, use a `cu_diff.yml` config file:

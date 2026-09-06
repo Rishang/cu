@@ -107,7 +107,7 @@ Then restart your shell. `cu completion --help` prints the same list.
 
 #### Console Login
 
-Generates a temporary AWS console login URL using STS `GetFederationToken`. A **policy JSON file is required** (`-f` / `--policy-file`).
+Generates an AWS console login URL. A **policy JSON file is required** (`-f` / `--policy-file`). With IAM user credentials, `cu` uses STS `GetFederationToken` and applies that policy. With AWS IAM Identity Center (SSO) or assumed-role credentials, it reuses the existing session because STS rejects `GetFederationToken` from session credentials; AWS does not support applying the policy file to that session.
 
 ```bash
 # Policy file is required — example: read-only S3 policy in ./read-only-policy.json
@@ -125,7 +125,6 @@ cu aws login -f ./read-only-policy.json --no-open
 [*] Using policy from file: ./read-only-policy.json
 [*] Using AWS (profile: default, region: us-east-1)
 [*] Requesting federation token for 'you' (duration: 7200s)...
-[+] Federation token received.
 [+] Console login URL generated (session valid for 7200s).
 [*] Opening URL in your default browser (xdg-open)...
 [+] Done. Check your browser.

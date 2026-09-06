@@ -28,39 +28,57 @@ func FederatedConsoleURL(ctx context.Context, cfg aws.Config, region string,
 	duration time.Duration, policy json.RawMessage,
 ) (string, error) {
 	client := sts.NewFromConfig(cfg)
-
-	identity, err := client.GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
+	credentials, err := cfg.Credentials.Retrieve(ctx)
 	if err != nil {
-		return "", fmt.Errorf("could not resolve caller identity: %w", err)
+		return "", fmt.Errorf("could not retrieve AWS credentials: %w", err)
 	}
-	// GetFederationToken caps the federated name at 32 characters.
-	name := path.Base(aws.ToString(identity.Arn))
-	name = name[:min(len(name), 32)]
 
 	seconds := strconv.Itoa(int(duration.Seconds()))
-	ui.Info("Requesting federation token for '%s' (duration: %ss)...",
-		ui.Yellow.Render(name), seconds)
+	var session []byte
+	if credentials.CanExpire {
+		// GetFederationToken rejects session credentials, including SSO and roles.
+		ui.Warn("Using temporary AWS credentials; the policy file cannot scope this console session.")
+		ui.Info("Using existing AWS session credentials (requested duration: %ss)...", seconds)
+		session, err = json.Marshal(map[string]string{
+			"sessionId":    credentials.AccessKeyID,
+			"sessionKey":   credentials.SecretAccessKey,
+			"sessionToken": credentials.SessionToken,
+		})
+		if err != nil {
+			return "", err
+		}
+	} else {
+		identity, err := client.GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
+		if err != nil {
+			return "", fmt.Errorf("could not resolve caller identity: %w", err)
+		}
+		// GetFederationToken caps the federated name at 32 characters.
+		name := path.Base(aws.ToString(identity.Arn))
+		name = name[:min(len(name), 32)]
+		ui.Info("Requesting federation token for '%s' (duration: %ss)...",
+			ui.Yellow.Render(name), seconds)
 
-	tokenInput := &sts.GetFederationTokenInput{
-		Name:            aws.String(name),
-		DurationSeconds: aws.Int32(int32(duration.Seconds())),
-	}
-	if len(policy) > 0 {
-		tokenInput.Policy = aws.String(string(policy))
-	}
+		tokenInput := &sts.GetFederationTokenInput{
+			Name:            aws.String(name),
+			DurationSeconds: aws.Int32(int32(duration.Seconds())),
+		}
+		if len(policy) > 0 {
+			tokenInput.Policy = aws.String(string(policy))
+		}
 
-	token, err := client.GetFederationToken(ctx, tokenInput)
-	if err != nil {
-		return "", fmt.Errorf("could not get federation token: %w", err)
-	}
+		token, err := client.GetFederationToken(ctx, tokenInput)
+		if err != nil {
+			return "", fmt.Errorf("could not get federation token: %w", err)
+		}
 
-	session, err := json.Marshal(map[string]string{
-		"sessionId":    aws.ToString(token.Credentials.AccessKeyId),
-		"sessionKey":   aws.ToString(token.Credentials.SecretAccessKey),
-		"sessionToken": aws.ToString(token.Credentials.SessionToken),
-	})
-	if err != nil {
-		return "", err
+		session, err = json.Marshal(map[string]string{
+			"sessionId":    aws.ToString(token.Credentials.AccessKeyId),
+			"sessionKey":   aws.ToString(token.Credentials.SecretAccessKey),
+			"sessionToken": aws.ToString(token.Credentials.SessionToken),
+		})
+		if err != nil {
+			return "", err
+		}
 	}
 
 	signinToken, err := fetchSigninToken(ctx, string(session), seconds)

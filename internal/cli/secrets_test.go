@@ -213,6 +213,7 @@ func TestMTLSClient(t *testing.T) {
 	}{
 		{"no mTLS fields set", func() (string, string, string) { return "", "", "" }, false},
 		{"client_cert without client_key", func() (string, string, string) { return certPath, "", "" }, true},
+		{"client_key without client_cert", func() (string, string, string) { return "", certPath, "" }, true},
 		{"unparsable client_cert", func() (string, string, string) { return certPath, certPath, "" }, true},
 		{"missing ca_cert", func() (string, string, string) { return "", "", filepath.Join(dir, "missing.pem") }, true},
 		{"non-PEM ca_cert", func() (string, string, string) { return "", "", certPath }, true},

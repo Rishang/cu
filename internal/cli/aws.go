@@ -60,8 +60,10 @@ func newAWSLoginCommand() *cobra.Command {
 				ui.Error("No policy file provided, use -f <policy_file>.json")
 				return exitWith(1)
 			}
-			if duration < 1 || duration > 24 {
-				ui.Error("--duration must be between 1 and 24 hours, got %d.", duration)
+			// The console sign-in endpoint caps SessionDuration at 12 hours,
+			// even though GetFederationToken itself would issue up to 36.
+			if duration < 1 || duration > 12 {
+				ui.Error("--duration must be between 1 and 12 hours, got %d.", duration)
 				return exitWith(1)
 			}
 
@@ -82,9 +84,9 @@ func newAWSLoginCommand() *cobra.Command {
 				return err
 			}
 
-			// LoadConfig already applied --region, so cfg.Region is the
-			// resolved one; fall back only when nothing resolved at all.
-			region := cmp.Or(cfg.Region, "us-east-1")
+			// An explicit --region wins; otherwise an SSO profile must open in
+			// its sso_region, which can differ from the profile's region.
+			region := cmp.Or(creds.region, awsx.SSORegion(cfg), cfg.Region, "us-east-1")
 			profileLabel := cmp.Or(creds.profile, os.Getenv("AWS_PROFILE"), "default")
 			ui.Info("Using AWS (profile: %s, region: %s)",
 				ui.Cyan.Render(profileLabel), ui.Cyan.Render(region))
@@ -112,7 +114,7 @@ func newAWSLoginCommand() *cobra.Command {
 
 	creds.register(cmd)
 	cmd.Flags().IntVarP(&duration, "duration", "d", 2,
-		"Duration for temporary credentials in hours (1-24).")
+		"Duration of the console session in hours (1-12).")
 	cmd.Flags().StringVarP(&policyFile, "policy-file", "f", "",
 		"Path to a JSON file containing an IAM policy to scope down permissions.")
 	cmd.Flags().BoolVar(&noOpen, "no-open", false,

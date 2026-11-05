@@ -71,7 +71,7 @@ func TestStreamLogsWritesPodOutput(t *testing.T) {
 
 	var buf bytes.Buffer
 	pod := Pod{Namespace: "prod", Name: "api-1", Containers: []string{"app"}}
-	if err := StreamLogs(pod, false, 8, &buf); err != nil {
+	if err := StreamLogs(t.Context(), pod, false, 8, &buf); err != nil {
 		t.Fatalf("StreamLogs: %v", err)
 	}
 
@@ -107,7 +107,7 @@ func TestStreamLogsPrefixesOnlyMultiContainerPods(t *testing.T) {
 
 			var buf bytes.Buffer
 			pod := Pod{Namespace: "prod", Name: "api-1", Containers: tc.containers}
-			if err := StreamLogs(pod, false, -1, &buf); err != nil {
+			if err := StreamLogs(t.Context(), pod, false, -1, &buf); err != nil {
 				t.Fatal(err)
 			}
 			if got := strings.Contains(buf.String(), "--prefix"); got != tc.wantPrefix {
@@ -125,7 +125,7 @@ func TestStreamLogsReportsFailure(t *testing.T) {
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	err := StreamLogs(Pod{Namespace: "prod", Name: "api-1"}, false, -1, &bytes.Buffer{})
+	err := StreamLogs(t.Context(), Pod{Namespace: "prod", Name: "api-1"}, false, -1, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "prod/api-1") {
 		t.Errorf("got %v, want an error naming the pod", err)
 	}
@@ -211,14 +211,14 @@ users:
 	}
 	t.Setenv("KUBECONFIG", config)
 
-	if got := CurrentContext(); got != "prod" {
+	if got := CurrentContext(t.Context()); got != "prod" {
 		t.Errorf("CurrentContext() = %q, want prod", got)
 	}
-	if got := CurrentNamespace(); got != "payments" {
+	if got := CurrentNamespace(t.Context()); got != "payments" {
 		t.Errorf("CurrentNamespace() = %q, want payments", got)
 	}
 
-	contexts, err := ListContexts()
+	contexts, err := ListContexts(t.Context())
 	if err != nil {
 		t.Fatalf("ListContexts: %v", err)
 	}
@@ -227,17 +227,17 @@ users:
 	}
 
 	// A context with no namespace falls back to what kubectl would use.
-	if err := UseContext("staging"); err != nil {
+	if err := UseContext(t.Context(), "staging"); err != nil {
 		t.Fatalf("UseContext: %v", err)
 	}
-	if got := CurrentNamespace(); got != "default" {
+	if got := CurrentNamespace(t.Context()); got != "default" {
 		t.Errorf("CurrentNamespace() with none set = %q, want default", got)
 	}
 
 	// No current-context at all is empty, not an error: the caller only marks
 	// a list with it.
 	t.Setenv("KUBECONFIG", filepath.Join(t.TempDir(), "missing"))
-	if got := CurrentContext(); got != "" {
+	if got := CurrentContext(t.Context()); got != "" {
 		t.Errorf("CurrentContext() with no kubeconfig = %q, want empty", got)
 	}
 }

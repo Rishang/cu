@@ -2,8 +2,12 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
+	"io"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -114,7 +118,7 @@ func TestDiffArgumentErrors(t *testing.T) {
 			"At least 2"},
 		{"missing file",
 			[]string{"diff", "-f", asset("app-dev.yaml"), "-f", "/nonexistent.yaml"},
-			"File not found"},
+			"file not found"},
 		{"bad format",
 			[]string{"diff", "-o", "xml", "-f", asset("app-dev.yaml"), "-f", asset("app-prod.yaml")},
 			"Invalid format"},
@@ -123,8 +127,8 @@ func TestDiffArgumentErrors(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			_, stderr, code := runCu(t, tc.args...)
-			if code != 1 {
-				t.Errorf("exit code = %d, want 1", code)
+			if code != 2 {
+				t.Errorf("exit code = %d, want 2: 1 means \"files differ\", so CI would mistake this failure for drift", code)
 			}
 			if !strings.Contains(stderr, tc.wantErr) {
 				t.Fatalf("stderr does not contain %q:\n%s", tc.wantErr, stderr)
@@ -138,24 +142,52 @@ func TestDiffConfigMode(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("exit code = %d, want 1 (the fixtures differ)", code)
 	}
-	if strings.Contains(stderr, "File not found") {
+	if strings.Contains(stderr, "file not found") {
 		t.Fatalf("relative paths failed to resolve:\n%s", stderr)
 	}
 	// Three files means three pairs, so three JSON documents.
-	if got := strings.Count(stdout, `"diffs"`); got != 3 {
-		t.Errorf("got %d rendered pairs, want 3", got)
+	if got := countJSONDocs(t, stdout); got != 3 {
+		t.Errorf("got %d JSON documents on stdout, want one per pair (3)", got)
+	}
+}
+
+// countJSONDocs decodes stdout as a stream of JSON values, the way jq reads
+// it, and fails if anything else (a header, a rule, a blank-line marker) is
+// mixed in.
+func countJSONDocs(t *testing.T, stdout string) int {
+	t.Helper()
+	dec := json.NewDecoder(strings.NewReader(stdout))
+	n := 0
+	for {
+		var v any
+		err := dec.Decode(&v)
+		if err == io.EOF {
+			return n
+		}
+		if err != nil {
+			t.Fatalf("stdout is not a pure JSON stream, so `| jq` would fail: %v\n%s", err, stdout)
+		}
+		n++
 	}
 }
 
 func TestDiffJSONGoesToStdoutOnly(t *testing.T) {
-	stdout, stderr, _ := runCu(t, "diff", "-o", "json",
-		"-f", asset("app-dev.yaml"), "-f", asset("app-prod.yaml"))
-
-	if !strings.Contains(stdout, `"diffs"`) {
-		t.Errorf("stdout has no JSON payload:\n%s", stdout)
-	}
-	if strings.Contains(stderr, `"diffs"`) {
-		t.Errorf("JSON leaked into stderr:\n%s", stderr)
+	for name, args := range map[string][]string{
+		"single pair": {"-f", asset("app-dev.yaml"), "-f", asset("app-prod.yaml")},
+		"config mode": {"--config", asset("cu_diff.yml")},
+	} {
+		t.Run(name+" stdout is pure JSON, headers on stderr", func(t *testing.T) {
+			stdout, stderr, _ := runCu(t, append([]string{"diff", "-o", "json"}, args...)...)
+			if countJSONDocs(t, stdout) == 0 {
+				t.Errorf("stdout has no JSON payload:\n%s", stdout)
+			}
+			if strings.Contains(stderr, `"diffs"`) {
+				t.Errorf("JSON leaked into stderr:\n%s", stderr)
+			}
+			if !strings.Contains(stderr, "DIFF") {
+				t.Errorf("pair header vanished instead of moving to stderr:\n%s", stderr)
+			}
+		})
 	}
 }
 
@@ -250,5 +282,24 @@ func TestCompletionsAreGenerated(t *testing.T) {
 				t.Errorf("completion script does not mention the cu binary")
 			}
 		})
+	}
+}
+
+// The cross-pair summary breaks out added and removed from the total; the rest
+// are changes. A reader uses it to judge whether drift is additive or not.
+func TestDiffOverallSummaryBreaksDownKinds(t *testing.T) {
+	stdout, _, _ := runCu(t, "diff", "--config", asset("cu_diff.yml"), "-o", "unified")
+
+	re := regexp.MustCompile(`(\d+) changes?, (\d+) added, (\d+) removed across (\d+) pair\(s\)`)
+	m := re.FindStringSubmatch(stdout)
+	if m == nil {
+		t.Fatalf("summary line with added/removed counts not found:\n%s", stdout)
+	}
+	n := func(s string) int { v, _ := strconv.Atoi(s); return v }
+	if total, parts := n(m[1]), n(m[2])+n(m[3]); parts > total {
+		t.Errorf("summary says %d differences but added+removed is %d: %q", total, parts, m[0])
+	}
+	if n(m[4]) != 3 {
+		t.Errorf("summary counts %s pairs, want 3 for three files: %q", m[4], m[0])
 	}
 }

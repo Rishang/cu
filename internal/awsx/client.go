@@ -17,3 +17,20 @@ func LoadConfig(ctx context.Context, profile, region string) (aws.Config, error)
 		config.WithSharedConfigProfile(profile),
 		config.WithRegion(region))
 }
+
+// SSORegion returns the IAM Identity Center region of the profile cfg was
+// loaded from, or "" when it has none. It reads the shared config LoadConfig
+// already resolved instead of re-reading the files: the SDK has picked the
+// profile and tolerated a missing one, so env-only credentials with no
+// [default] section yield "" rather than an error.
+func SSORegion(cfg aws.Config) string {
+	for _, src := range cfg.ConfigSources {
+		if shared, ok := src.(config.SharedConfig); ok {
+			if shared.SSOSession != nil && shared.SSOSession.SSORegion != "" {
+				return shared.SSOSession.SSORegion
+			}
+			return shared.SSORegion
+		}
+	}
+	return ""
+}

@@ -107,7 +107,7 @@ Then restart your shell. `cu completion --help` prints the same list.
 
 #### Console Login
 
-Generates an AWS console login URL. A **policy JSON file is required** (`-f` / `--policy-file`). With IAM user credentials, `cu` uses STS `GetFederationToken` and applies that policy. With AWS IAM Identity Center (SSO) or assumed-role credentials, it reuses the existing session because STS rejects `GetFederationToken` from session credentials; AWS does not support applying the policy file to that session.
+Generates an AWS console login URL. A **policy JSON file is required** (`-f` / `--policy-file`). With IAM user credentials, `cu` uses STS `GetFederationToken` and applies that policy. With AWS IAM Identity Center (SSO) or assumed-role credentials, it reuses the existing session because STS rejects `GetFederationToken` from session credentials; AWS does not support applying the policy file to that session. For SSO profiles, the console opens in the IAM Identity Center region (`sso_region`), which can differ from the profile's `region`; an explicit `--region` still wins. Otherwise it uses the resolved AWS region.
 
 ```bash
 # Policy file is required — example: read-only S3 policy in ./read-only-policy.json
@@ -816,9 +816,9 @@ cu diff -f a.yaml -f b.yaml -o json
 cu diff -f a.yaml -f b.yaml --format json
 ```
 
-Exit code is `0` when no differences are found, `1` otherwise — suitable for CI pipelines.
+Exit code is `0` when no differences are found, `1` when there are differences, and `2` when the comparison could not run (bad flags, a missing or unparsable file) — the same convention as `diff`, so CI can tell real drift from a broken pipeline.
 
-All formats write to stdout, so `cu diff -u | grep foo` and `cu diff | less` work the same as `diff`/`git diff`.
+All formats write to stdout, so `cu diff -u | grep foo` and `cu diff | less` work the same as `diff`/`git diff`. With `--format json` the pair headers and summary move to stderr, so stdout is a pure stream of JSON documents (one per pair) that `jq` reads directly.
 
 #### Compare using a config file
 
@@ -917,7 +917,8 @@ cu pwpush pwgen --length 24
 ```
 
 Notes:
-- Config is stored under the `psst:` key of `~/.config/cu/config.yml`, mode `0600` — it holds an API token.
+- Config is stored under the `psst:` key of `~/.config/cu/config.yml`, mode `0600` — it holds an API token. `config` rewrites only that section: comments, `${VAR}` references and the `vault:` list are left as you wrote them, so a reference never gets replaced by the secret it points at.
+- `list-active` prints its table to stdout and `send` prints the bare URL when piped, so `> file` and `| pbcopy` get plain text with no colour codes.
 - `send` uses bearer auth when no email is stored in config; legacy header auth when `email` is present in the saved config.
 
 ## 🎯 Interactive Selection

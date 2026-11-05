@@ -7,6 +7,7 @@ package kube
 
 import (
 	"cmp"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -20,6 +21,8 @@ import (
 	"strings"
 
 	"golang.org/x/term"
+
+	"github.com/Rishang/cloudutil/internal/ui"
 )
 
 // KeyRef identifies a single data key inside a Secret or ConfigMap.
@@ -36,16 +39,16 @@ func (k KeyRef) Display() string {
 
 // kubectl builds a kubectl command carrying the environment it should run with,
 // which is the ambient one everywhere except inside a pod with no kubeconfig.
-func kubectl(args ...string) *exec.Cmd {
-	cmd := exec.Command("kubectl", args...)
+func kubectl(ctx context.Context, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "kubectl", args...)
 	cmd.Env = kubectlEnv()
 	return cmd
 }
 
 // run executes kubectl and returns its stdout, turning a failure into an error
 // carrying kubectl's own message.
-func run(args ...string) ([]byte, error) {
-	out, err := kubectl(args...).Output()
+func run(ctx context.Context, args ...string) ([]byte, error) {
+	out, err := kubectl(ctx, args...).Output()
 	if err == nil {
 		return out, nil
 	}
@@ -62,9 +65,9 @@ func run(args ...string) ([]byte, error) {
 }
 
 // runJSON executes kubectl with -o json and decodes the result into T.
-func runJSON[T any](args ...string) (T, error) {
+func runJSON[T any](ctx context.Context, args ...string) (T, error) {
 	var data T
-	out, err := run(args...)
+	out, err := run(ctx, args...)
 	if err != nil {
 		return data, err
 	}
@@ -85,8 +88,8 @@ type objectMeta struct {
 // runLines executes kubectl and returns its non-blank stdout lines, for
 // queries that are just a list of names. Split on newlines only, not
 // strings.Fields: a context name may contain a space.
-func runLines(args ...string) ([]string, error) {
-	out, err := run(args...)
+func runLines(ctx context.Context, args ...string) ([]string, error) {
+	out, err := run(ctx, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -94,15 +97,15 @@ func runLines(args ...string) ([]string, error) {
 }
 
 // ListContexts returns context names from the current kubeconfig.
-func ListContexts() ([]string, error) {
-	return runLines("config", "get-contexts", "-o", "name")
+func ListContexts(ctx context.Context) ([]string, error) {
+	return runLines(ctx, "config", "get-contexts", "-o", "name")
 }
 
 // configValue runs a read-only kubectl config query. A failure — no kubeconfig,
 // nothing selected — reads as "unset" rather than an error: callers only use
 // these to mark the active entry in a list.
-func configValue(args ...string) string {
-	out, err := run(args...)
+func configValue(ctx context.Context, args ...string) string {
+	out, err := run(ctx, args...)
 	if err != nil {
 		return ""
 	}
@@ -110,20 +113,20 @@ func configValue(args ...string) string {
 }
 
 // CurrentContext returns the context kubectl would act on.
-func CurrentContext() string { return configValue("config", "current-context") }
+func CurrentContext(ctx context.Context) string { return configValue(ctx, "config", "current-context") }
 
 // CurrentNamespace returns the current context's default namespace, which is
 // what a bare kubectl get would search. An unset one falls back to default,
 // just as kubectl does.
-func CurrentNamespace() string {
-	return cmp.Or(configValue("config", "view", "--minify", "-o", "jsonpath={..namespace}"), "default")
+func CurrentNamespace(ctx context.Context) string {
+	return cmp.Or(configValue(ctx, "config", "view", "--minify", "-o", "jsonpath={..namespace}"), "default")
 }
 
 // ListNamespaces returns every namespace name. jsonpath rather than `-o name`,
 // which prefixes each line with "namespace/". The API returns them sorted and
 // names are unique, so there is nothing to sort or dedupe here.
-func ListNamespaces() ([]string, error) {
-	return runLines("get", "namespaces", "-o",
+func ListNamespaces(ctx context.Context) ([]string, error) {
+	return runLines(ctx, "get", "namespaces", "-o",
 		`jsonpath={range .items[*]}{.metadata.name}{"\n"}{end}`)
 }
 
@@ -149,10 +152,10 @@ type keyedItem struct {
 
 // ListKeys returns one entry per data key of every Secret or ConfigMap in
 // scope; resource is what kubectl calls them.
-func ListKeys(resource string, allNamespaces bool, namespace string) ([]KeyRef, error) {
+func ListKeys(ctx context.Context, resource string, allNamespaces bool, namespace string) ([]KeyRef, error) {
 	args := scopeArgs([]string{"get", resource, "-o", "json"}, allNamespaces, namespace)
 
-	list, err := runJSON[struct{ Items []keyedItem }](args...)
+	list, err := runJSON[struct{ Items []keyedItem }](ctx, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -180,8 +183,8 @@ func ListKeys(resource string, allNamespaces bool, namespace string) ([]KeyRef, 
 }
 
 // SecretValue fetches one Secret key, base64-decoding data entries.
-func SecretValue(ref KeyRef) (string, error) {
-	secret, err := runJSON[keyedItem]("get", "secret", ref.Name, "-n", ref.Namespace, "-o", "json")
+func SecretValue(ctx context.Context, ref KeyRef) (string, error) {
+	secret, err := runJSON[keyedItem](ctx, "get", "secret", ref.Name, "-n", ref.Namespace, "-o", "json")
 	if err != nil {
 		return "", err
 	}
@@ -197,8 +200,8 @@ func SecretValue(ref KeyRef) (string, error) {
 
 // ConfigMapValue fetches one ConfigMap key. Binary entries are summarized
 // rather than dumped.
-func ConfigMapValue(ref KeyRef) (string, error) {
-	cm, err := runJSON[keyedItem]("get", "configmap", ref.Name, "-n", ref.Namespace, "-o", "json")
+func ConfigMapValue(ctx context.Context, ref KeyRef) (string, error) {
+	cm, err := runJSON[keyedItem](ctx, "get", "configmap", ref.Name, "-n", ref.Namespace, "-o", "json")
 	if err != nil {
 		return "", err
 	}
@@ -240,8 +243,8 @@ type podList struct {
 }
 
 // ListPods returns pods with their containers and phase.
-func ListPods(allNamespaces bool, namespace string) ([]Pod, error) {
-	list, err := runJSON[podList](scopeArgs([]string{"get", "pods", "-o", "json"}, allNamespaces, namespace)...)
+func ListPods(ctx context.Context, allNamespaces bool, namespace string) ([]Pod, error) {
+	list, err := runJSON[podList](ctx, scopeArgs([]string{"get", "pods", "-o", "json"}, allNamespaces, namespace)...)
 	if err != nil {
 		return nil, err
 	}
@@ -275,7 +278,7 @@ func parsePods(list podList) []Pod {
 // kubectl's own --prefix labels the lines when the pod has several containers;
 // there is no reason to reimplement it here. tail is passed through untouched,
 // where -1 means the whole log.
-func StreamLogs(pod Pod, follow bool, tail int, w io.Writer) error {
+func StreamLogs(ctx context.Context, pod Pod, follow bool, tail int, w io.Writer) error {
 	args := []string{
 		"logs", pod.Name, "-n", pod.Namespace,
 		"--all-containers=true", "--tail=" + strconv.Itoa(tail),
@@ -287,7 +290,7 @@ func StreamLogs(pod Pod, follow bool, tail int, w io.Writer) error {
 		args = append(args, "--prefix")
 	}
 
-	cmd := kubectl(args...)
+	cmd := kubectl(ctx, args...)
 	cmd.Stdout = w
 	cmd.Stderr = os.Stderr // kubectl explains its own failures
 	if err := cmd.Run(); err != nil {
@@ -297,12 +300,12 @@ func StreamLogs(pod Pod, follow bool, tail int, w io.Writer) error {
 }
 
 // Exec runs a command in a pod with the process's standard streams attached.
-func Exec(pod Pod, container string, command []string) error {
+func Exec(ctx context.Context, pod Pod, container string, command []string) error {
 	// -t only when stdin really is a terminal; otherwise kubectl warns and
 	// drops it, and piped input would arrive mangled by tty processing.
 	args := execArgs(pod, container, command, term.IsTerminal(int(os.Stdin.Fd())))
 
-	cmd := kubectl(args...)
+	cmd := kubectl(ctx, args...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	return cmd.Run()
 }
@@ -321,21 +324,21 @@ func execArgs(pod Pod, container string, command []string, tty bool) []string {
 }
 
 // UseContext switches the current kubeconfig context.
-func UseContext(name string) error {
-	return configure("config", "use-context", name)
+func UseContext(ctx context.Context, name string) error {
+	return configure(ctx, "config", "use-context", name)
 }
 
 // UseNamespace sets the default namespace on the current context.
-func UseNamespace(name string) error {
-	return configure("config", "set-context", "--current", "--namespace", name)
+func UseNamespace(ctx context.Context, name string) error {
+	return configure(ctx, "config", "set-context", "--current", "--namespace", name)
 }
 
 // configure runs a kubectl config subcommand, relaying kubectl's confirmation
 // to stderr so stdout stays free for data.
-func configure(args ...string) error {
-	out, err := run(args...)
+func configure(ctx context.Context, args ...string) error {
+	out, err := run(ctx, args...)
 	if len(out) > 0 {
-		fmt.Fprint(os.Stderr, string(out))
+		fmt.Fprint(ui.Err, string(out))
 	}
 	return err
 }

@@ -136,9 +136,10 @@ func Error(format string, a ...any) {
 	Printf("%s %s", BoldRed.Render("[ERROR]"), fmt.Sprintf(format, a...))
 }
 
-// outIsTerminal reports whether Out is a real terminal. Out is redirected in
+// OutIsTerminal reports whether Out is a real terminal. Out is redirected in
 // tests and whenever stdout is piped, and neither should get escape codes.
-func outIsTerminal() bool {
+// Color is decided by stderr, so anything styled onto stdout checks this too.
+func OutIsTerminal() bool {
 	f, ok := Out.(*os.File)
 	return ok && term.IsTerminal(int(f.Fd()))
 }
@@ -161,7 +162,7 @@ func PrintJSON(v any) error {
 func PrintJSONBytes(data []byte) error {
 	data = bytes.TrimRight(data, "\n")
 
-	if !outIsTerminal() {
+	if !OutIsTerminal() {
 		_, err := fmt.Fprintf(Out, "%s\n", data)
 		return err
 	}
@@ -274,23 +275,24 @@ func jsonQuote(s string) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// Rule draws a full-width horizontal rule with a centered title, to stdout:
-// its only caller (cu diff) uses it to header the diff data. The title is
-// expected to be pre-styled; line styles the dashes.
-func Rule(title string, line Style) {
+// Rule draws a full-width horizontal rule with a centered title to out. Its
+// only caller (cu diff) picks out: stdout when the rule heads human-readable
+// diff data, stderr when stdout must stay pure JSON. The title is expected to
+// be pre-styled; line styles the dashes.
+func Rule(out io.Writer, title string, line Style) {
 	w := width()
 	if title == "" {
-		PrintOut(line.Render(strings.Repeat("─", w)))
+		fmt.Fprintln(out, line.Render(strings.Repeat("─", w)))
 		return
 	}
 
 	label := " " + title + " "
 	inner := TextWidth(label)
 	if inner >= w {
-		PrintOut(label)
+		fmt.Fprintln(out, label)
 		return
 	}
 	left := (w - inner) / 2
-	PrintOut(line.Render(strings.Repeat("─", left)) + label +
+	fmt.Fprintln(out, line.Render(strings.Repeat("─", left))+label+
 		line.Render(strings.Repeat("─", w-inner-left)))
 }

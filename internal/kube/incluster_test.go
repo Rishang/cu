@@ -97,10 +97,10 @@ func TestWriteInClusterKubeconfig(t *testing.T) {
 
 	// kubectl accepts it, and resolves the pod's own namespace rather than
 	// falling back to "default".
-	if got := CurrentContext(); got != "in-cluster" {
+	if got := CurrentContext(t.Context()); got != "in-cluster" {
 		t.Errorf("CurrentContext() = %q, want in-cluster", got)
 	}
-	if got := CurrentNamespace(); got != "payments" {
+	if got := CurrentNamespace(t.Context()); got != "payments" {
 		t.Errorf("CurrentNamespace() = %q, want the pod's namespace", got)
 	}
 
@@ -185,10 +185,10 @@ func TestKubectlEnvUsesInClusterKubeconfig(t *testing.T) {
 	// The real proof: kubectl resolves the pod's context with nothing in the
 	// environment pointing at a config.
 	t.Setenv("KUBECONFIG", "")
-	if got := CurrentContext(); got != "in-cluster" {
+	if got := CurrentContext(t.Context()); got != "in-cluster" {
 		t.Errorf("CurrentContext() = %q, want in-cluster — the config is not reaching kubectl", got)
 	}
-	if got := CurrentNamespace(); got != "payments" {
+	if got := CurrentNamespace(t.Context()); got != "payments" {
 		t.Errorf("CurrentNamespace() = %q, want the pod's namespace", got)
 	}
 
@@ -196,5 +196,41 @@ func TestKubectlEnvUsesInClusterKubeconfig(t *testing.T) {
 	inClusterKubeconfig = func() string { return "" }
 	if env := kubectlEnv(); env != nil {
 		t.Errorf("kubectlEnv() = %v, want nil so the child inherits", env)
+	}
+}
+
+// The kubeconfig lives at a fixed name in a shared temp dir. Whatever another
+// user planted there first must be replaced, never followed or written
+// through, or they could repoint server: and collect the service-account token.
+func TestWriteInClusterKubeconfigReplacesPlantedSymlink(t *testing.T) {
+	stubServiceAccount(t)
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+
+	target := filepath.Join(t.TempDir(), "attacker-owned")
+	if err := os.WriteFile(target, []byte("server: https://evil.example\n"), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	planted := filepath.Join(tmp, "cu-in-cluster.kubeconfig")
+	if err := os.Symlink(target, planted); err != nil {
+		t.Fatal(err)
+	}
+
+	path, err := writeInClusterKubeconfig()
+	if err != nil {
+		t.Fatalf("writeInClusterKubeconfig: %v", err)
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Error("the planted symlink is still in place, so kubectl would read the attacker's file")
+	}
+	if raw, _ := os.ReadFile(target); strings.Contains(string(raw), "tokenFile") {
+		t.Error("the kubeconfig was written through the symlink into a file another user controls")
+	}
+	if leftovers, _ := filepath.Glob(filepath.Join(tmp, "cu-in-cluster-*")); len(leftovers) != 0 {
+		t.Errorf("temp files left behind, which would accumulate every run: %v", leftovers)
 	}
 }

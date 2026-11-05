@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/Rishang/cloudutil/internal/ui"
 )
 
 // serviceAccountDir is where the kubelet projects a pod's credentials. A
@@ -39,7 +41,7 @@ var inClusterKubeconfig = sync.OnceValue(func() string {
 	if err != nil {
 		// Say why cu could not supply a config, then let kubectl report the
 		// missing configuration in its own words.
-		fmt.Fprintf(os.Stderr, "[!] could not build an in-cluster kubeconfig: %v\n", err)
+		ui.Warn("Could not build an in-cluster kubeconfig: %v", err)
 		return ""
 	}
 	return path
@@ -106,10 +108,28 @@ users:
 		filepath.Join(serviceAccountDir, "token"))
 
 	// A fixed name inside the temp dir: the file holds only paths, is rewritten
-	// every run, and so needs no cleanup and cannot accumulate.
+	// every run, and so needs no cleanup and cannot accumulate. It is written
+	// to a fresh exclusive file and renamed into place rather than written
+	// directly, because the temp dir is shared: a file or symlink another user
+	// planted at the fixed name would otherwise be followed or reused, letting
+	// them repoint server: and receive the service-account token. rename
+	// replaces a symlink rather than following it, and in a sticky /tmp it
+	// fails outright on a file someone else owns.
 	path := filepath.Join(os.TempDir(), "cu-in-cluster.kubeconfig")
-	if err := os.WriteFile(path, []byte(config), 0o600); err != nil {
+	tmp, err := os.CreateTemp(os.TempDir(), "cu-in-cluster-*.kubeconfig")
+	if err != nil {
 		return "", err
+	}
+	defer os.Remove(tmp.Name()) // no-op once the rename has succeeded
+	if _, err := tmp.WriteString(config); err != nil {
+		tmp.Close()
+		return "", err
+	}
+	if err := tmp.Close(); err != nil {
+		return "", err
+	}
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		return "", fmt.Errorf("could not place kubeconfig at %s: %w", path, err)
 	}
 	return path, nil
 }

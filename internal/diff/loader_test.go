@@ -58,7 +58,7 @@ func TestLoadFileJSON(t *testing.T) {
 
 	t.Run("invalid", func(t *testing.T) {
 		_, err := LoadFile(write(t, "bad.json", `{not valid json}`))
-		assertErrContains(t, err, "Invalid JSON")
+		assertErrContains(t, err, "invalid JSON")
 	})
 }
 
@@ -128,7 +128,7 @@ func TestLoadFileYAML(t *testing.T) {
 
 	t.Run("invalid", func(t *testing.T) {
 		_, err := LoadFile(write(t, "bad.yaml", "key: [\n  - unbalanced\n"))
-		assertErrContains(t, err, "Invalid YAML")
+		assertErrContains(t, err, "invalid YAML")
 	})
 }
 
@@ -150,19 +150,19 @@ func TestLoadFileTOML(t *testing.T) {
 
 	t.Run("invalid", func(t *testing.T) {
 		_, err := LoadFile(write(t, "bad.toml", "key = [invalid toml"))
-		assertErrContains(t, err, "Invalid TOML")
+		assertErrContains(t, err, "invalid TOML")
 	})
 }
 
 func TestLoadFileErrors(t *testing.T) {
 	t.Run("missing file", func(t *testing.T) {
 		_, err := LoadFile("/nonexistent/path/file.yaml")
-		assertErrContains(t, err, "File not found")
+		assertErrContains(t, err, "file not found")
 	})
 
 	t.Run("unsupported extension", func(t *testing.T) {
 		_, err := LoadFile(write(t, "config.xml", "<root/>"))
-		assertErrContains(t, err, "Unsupported format")
+		assertErrContains(t, err, "unsupported format")
 	})
 }
 

@@ -5,15 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"strconv"
-	"syscall"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
+
+	"github.com/Rishang/cloudutil/internal/proc"
 )
 
 // ListParameters returns every parameter name under prefix.
@@ -109,8 +109,8 @@ type Tunnel struct {
 	LocalPort  int
 }
 
-// StartSession opens an SSM session via the SDK and replaces this process
-// with session-manager-plugin, which owns the terminal for the session's
+// StartSession opens an SSM session via the SDK and hands the terminal to
+// session-manager-plugin (proc.Replace), which owns it for the session's
 // duration and speaks the actual data-channel protocol.
 //
 // session-manager-plugin is a separate install (there's no Go client for its
@@ -159,7 +159,7 @@ func StartSession(ctx context.Context, cfg aws.Config, instanceID string, t Tunn
 	// if that's ever needed.
 	endpoint := fmt.Sprintf("https://ssm.%s.amazonaws.com", cfg.Region)
 	argv := []string{binary, string(response), cfg.Region, "StartSession", "", string(request), endpoint}
-	return syscall.Exec(binary, argv, os.Environ())
+	return proc.Replace(binary, argv)
 }
 
 // sessionResponse mirrors the JSON session-manager-plugin expects as its

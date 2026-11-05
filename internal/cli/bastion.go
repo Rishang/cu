@@ -53,6 +53,7 @@ func dialBastion(ctx context.Context, p secretProvider, remoteAddr string) (stri
 	}
 	sshConn, chans, reqs, err := ssh.NewClientConn(conn, conn.RemoteAddr().String(), config)
 	if err != nil {
+		conn.Close()
 		return "", fmt.Errorf("bastion handshake with %s: %w", b.Host, err)
 	}
 	client := ssh.NewClient(sshConn, chans, reqs)

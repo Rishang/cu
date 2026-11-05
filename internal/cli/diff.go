@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -71,14 +72,21 @@ Common flags:
 	return cmd
 }
 
+// exitTrouble is cu diff's code for "could not compare" (bad flags, a missing
+// or unparsable file), kept apart from 1 = "differences found" the way diff(1)
+// does, so CI can tell drift from a broken pipeline.
+const exitTrouble = 2
+
 func runDiff(f *diffFlags) error {
-	if f.noColor {
+	// The diff itself is styled onto stdout, so `> file` or `| grep` must not
+	// get escape codes just because stderr is still a terminal.
+	if f.noColor || !ui.OutIsTerminal() {
 		ui.SetColor(false)
 	}
 
 	if len(f.files) > 0 && f.config != "" {
 		ui.Error("Use either -f flags or a config file argument, not both.")
-		return exitWith(1)
+		return exitWith(exitTrouble)
 	}
 
 	if len(f.files) == 0 && f.config == "" {
@@ -86,7 +94,7 @@ func runDiff(f *diffFlags) error {
 			f.config = defaultConfigName
 		} else {
 			ui.Error("Specify -f <file> -f <file> or --config <%s>.", defaultConfigName)
-			return exitWith(1)
+			return exitWith(exitTrouble)
 		}
 	}
 
@@ -97,7 +105,7 @@ func runDiff(f *diffFlags) error {
 	}
 	if cliFormat != "" && !diff.ValidFormat(cliFormat) {
 		ui.Error("Invalid format %q: expected unified, table, or json.", f.format)
-		return exitWith(1)
+		return exitWith(exitTrouble)
 	}
 
 	if len(f.files) > 0 {
@@ -109,27 +117,27 @@ func runDiff(f *diffFlags) error {
 func runInlineDiff(f *diffFlags, cliFormat diff.Format) error {
 	if len(f.files) < 2 {
 		ui.Error("At least 2 -f/--file values required, got %d.", len(f.files))
-		return exitWith(1)
+		return exitWith(exitTrouble)
 	}
 	if cliFormat == "" {
 		cliFormat = diff.DefaultFormat
 	}
 
-	total, pairs, err := diffPairs(f.files, f.files, "", diff.FilterRules{
+	counts, pairs, err := diffPairs(f.files, f.files, "", diff.FilterRules{
 		LocalIgnoreKeys:     f.ignoreKeys,
 		LocalIgnorePatterns: f.ignorePatterns,
 	}, cliFormat, f.query)
 	if err != nil {
 		return err
 	}
-	return finish(total, pairs)
+	return finish(counts, pairs, cliFormat)
 }
 
 func runConfigDiff(f *diffFlags, cliFormat diff.Format) error {
 	cfg, err := diff.LoadConfig(f.config)
 	if err != nil {
 		ui.Error("%v", err)
-		return exitWith(1)
+		return exitWith(exitTrouble)
 	}
 
 	format := cliFormat
@@ -142,7 +150,8 @@ func runConfigDiff(f *diffFlags, cliFormat diff.Format) error {
 		return err
 	}
 
-	total, pairs := 0, 0
+	var counts tally
+	pairs := 0
 	for i, entry := range cfg.Diffs {
 		// Query precedence: CLI -q, then the per-pair query, then the global one.
 		query := f.query
@@ -163,7 +172,7 @@ func runConfigDiff(f *diffFlags, cliFormat diff.Format) error {
 			resolved[j] = filepath.Join(configDir, file)
 		}
 
-		count, n, err := diffPairs(resolved, entry.Files,
+		c, n, err := diffPairs(resolved, entry.Files,
 			fmt.Sprintf("DIFF %d/%d", i+1, len(cfg.Diffs)), diff.FilterRules{
 				GlobalIgnoreKeys:     cfg.GlobalIgnoreKeys,
 				LocalIgnoreKeys:      entry.IgnoreKeys,
@@ -173,17 +182,18 @@ func runConfigDiff(f *diffFlags, cliFormat diff.Format) error {
 		if err != nil {
 			return err
 		}
-		total += count
+		counts.add(c)
 		pairs += n
 	}
-	return finish(total, pairs)
+	return finish(counts, pairs, format)
 }
 
 // diffPairs renders every 2-combination of the given files. paths are what gets
 // loaded, display what the header shows (config mode keeps the paths as written).
 // prefix labels the group and is empty in inline mode. It returns the number of
 // differences found and the number of pairs compared.
-func diffPairs(paths, display []string, prefix string, rules diff.FilterRules, format diff.Format, query string) (total, pairs int, err error) {
+func diffPairs(paths, display []string, prefix string, rules diff.FilterRules, format diff.Format, query string) (counts tally, pairs int, err error) {
+	w := decorationWriter(format)
 	combos := indexPairs(len(paths))
 	for i, pair := range combos {
 		label := prefix
@@ -194,41 +204,63 @@ func diffPairs(paths, display []string, prefix string, rules diff.FilterRules, f
 			label = strings.TrimSpace(fmt.Sprintf("%s PAIR %d/%d", prefix, i+1, len(combos)))
 		}
 		fileA, fileB := paths[pair[0]], paths[pair[1]]
-		printPairHeader(label, fileA, fileB, display[pair[0]], display[pair[1]])
+		printPairHeader(w, label, fileA, fileB, display[pair[0]], display[pair[1]])
 
-		count, err := executeDiff(fileA, fileB, rules, format, query)
+		c, err := executeDiff(fileA, fileB, rules, format, query)
 		if err != nil {
-			return 0, 0, err
+			return tally{}, 0, err
 		}
-		total += count
-		ui.PrintOut("")
+		counts.add(c)
+		fmt.Fprintln(w)
 	}
-	return total, len(combos), nil
+	return counts, len(combos), nil
+}
+
+// decorationWriter is where the headers and summary around each diff go. For
+// unified/table they are part of what a human pipes into grep, so stdout; for
+// JSON they would break `| jq`, so stderr keeps stdout a pure JSON stream.
+func decorationWriter(format diff.Format) io.Writer {
+	if format == diff.FormatJSON {
+		return ui.Err
+	}
+	return ui.Out
 }
 
 // finish prints the cross-pair summary and exits 1 when anything differed.
-func finish(total, pairs int) error {
+func finish(counts tally, pairs int, format diff.Format) error {
 	if pairs > 1 {
-		printOverallSummary(total, pairs)
+		printOverallSummary(decorationWriter(format), counts, pairs)
 	}
-	if total > 0 {
+	if counts.total() > 0 {
 		return exitWith(1)
 	}
 	return nil
 }
 
-// executeDiff loads, diffs, filters and renders one pair, returning how many
-// differences survived filtering.
-func executeDiff(fileA, fileB string, rules diff.FilterRules, format diff.Format, query string) (int, error) {
+// tally counts surviving differences by kind, for the cross-pair summary.
+// A type change counts as changed, as it does in the per-pair summary.
+type tally struct{ added, removed, changed int }
+
+func (t tally) total() int { return t.added + t.removed + t.changed }
+
+func (t *tally) add(o tally) {
+	t.added += o.added
+	t.removed += o.removed
+	t.changed += o.changed
+}
+
+// executeDiff loads, diffs, filters and renders one pair, returning the
+// differences that survived filtering, by kind.
+func executeDiff(fileA, fileB string, rules diff.FilterRules, format diff.Format, query string) (tally, error) {
 	dataA, err := diff.LoadFile(fileA)
 	if err != nil {
 		ui.Error("%v", err)
-		return 0, exitWith(1)
+		return tally{}, exitWith(exitTrouble)
 	}
 	dataB, err := diff.LoadFile(fileB)
 	if err != nil {
 		ui.Error("%v", err)
-		return 0, exitWith(1)
+		return tally{}, exitWith(exitTrouble)
 	}
 
 	kept, ignored := diff.Apply(diff.Compute(dataA, dataB), rules)
@@ -247,28 +279,45 @@ func executeDiff(fileA, fileB string, rules diff.FilterRules, format diff.Format
 		BranchB: diff.GitBranch(fileB),
 		Ignored: ignored,
 	})
-	return len(kept), nil
+
+	var counts tally
+	for _, d := range kept {
+		switch d.Kind {
+		case diff.KindAdded:
+			counts.added++
+		case diff.KindRemoved:
+			counts.removed++
+		default:
+			counts.changed++
+		}
+	}
+	return counts, nil
 }
 
-func printPairHeader(label, fileA, fileB, displayA, displayB string) {
+func printPairHeader(w io.Writer, label, fileA, fileB, displayA, displayB string) {
 	tag := func(path string) string {
 		if branch := diff.GitBranch(path); branch != "" {
 			return ui.Dim.Sprintf("  (%s)", branch)
 		}
 		return ""
 	}
-	ui.Rule(ui.Bold.Render(label), ui.Cyan)
-	ui.PrintfOut("  %s  %s%s", ui.Red.Render("−"), ui.Cyan.Render(displayA), tag(fileA))
-	ui.PrintfOut("  %s  %s%s", ui.Green.Render("+"), ui.Cyan.Render(displayB), tag(fileB))
-	ui.PrintOut("")
+	ui.Rule(w, ui.Bold.Render(label), ui.Cyan)
+	fmt.Fprintf(w, "  %s  %s%s\n", ui.Red.Render("−"), ui.Cyan.Render(displayA), tag(fileA))
+	fmt.Fprintf(w, "  %s  %s%s\n", ui.Green.Render("+"), ui.Cyan.Render(displayB), tag(fileB))
+	fmt.Fprintln(w)
 }
 
-func printOverallSummary(total, pairs int) {
-	if total == 0 {
-		ui.Rule(ui.BoldGreen.Render("✅  ALL DIFFS PASSED — no differences detected."), ui.Green)
+func printOverallSummary(w io.Writer, counts tally, pairs int) {
+	if counts.total() == 0 {
+		ui.Rule(w, ui.BoldGreen.Render("✅  ALL DIFFS PASSED — no differences detected."), ui.Green)
 		return
 	}
-	ui.Rule(ui.BoldRed.Sprintf("❌  %d difference(s) across %d pair(s).", total, pairs), ui.Red)
+	noun := "changes"
+	if counts.total() == 1 {
+		noun = "change"
+	}
+	ui.Rule(w, ui.BoldRed.Sprintf("❌  %d %s, %d added, %d removed across %d pair(s)",
+		counts.total(), noun, counts.added, counts.removed, pairs), ui.Red)
 }
 
 // indexPairs returns every 2-combination of indices, in order.

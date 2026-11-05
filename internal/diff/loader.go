@@ -25,14 +25,14 @@ func LoadFile(path string) (any, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, fmt.Errorf("File not found: %s", path)
+			return nil, fmt.Errorf("file not found: %s", path)
 		}
 		return nil, err
 	}
 
 	ext := strings.ToLower(filepath.Ext(path))
 	if !slices.Contains(supportedExtensions, ext) {
-		return nil, fmt.Errorf("Unsupported format %q. Supported: %s",
+		return nil, fmt.Errorf("unsupported format %q. Supported: %s",
 			ext, strings.Join(supportedExtensions, ", "))
 	}
 
@@ -40,29 +40,29 @@ func LoadFile(path string) (any, error) {
 	case ".json":
 		v, err := decodeJSON(data)
 		if err != nil {
-			return nil, fmt.Errorf("Invalid JSON in %q: %w", path, err)
+			return nil, fmt.Errorf("invalid JSON in %q: %w", path, err)
 		}
 		return v, nil
 	case ".toml":
 		var v any
 		if err := toml.Unmarshal(data, &v); err != nil {
-			return nil, fmt.Errorf("Invalid TOML in %q: %w", path, err)
+			return nil, fmt.Errorf("invalid TOML in %q: %w", path, err)
 		}
 		return v, nil
 	case ".tf", ".hcl", ".tfvars":
 		converted, err := convert.Bytes(data, path, convert.Options{})
 		if err != nil {
-			return nil, fmt.Errorf("Invalid HCL in %q: %w", path, err)
+			return nil, fmt.Errorf("invalid HCL in %q: %w", path, err)
 		}
 		v, err := decodeJSON(converted)
 		if err != nil {
-			return nil, fmt.Errorf("Invalid HCL in %q: %w", path, err)
+			return nil, fmt.Errorf("invalid HCL in %q: %w", path, err)
 		}
 		return v, nil
 	default: // .yaml / .yml
 		v, err := decodeYAML(data)
 		if err != nil {
-			return nil, fmt.Errorf("Invalid YAML in %q: %w", path, err)
+			return nil, fmt.Errorf("invalid YAML in %q: %w", path, err)
 		}
 		return v, nil
 	}

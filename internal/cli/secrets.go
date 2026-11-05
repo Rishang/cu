@@ -307,6 +307,12 @@ the full mapping.`,
 			return pickAndPrint(secrets, secretRef.Display, "secret", "secret> ",
 				func(ref secretRef) (string, any, error) {
 					value, err := ref.get(ctx)
+					// Policies that grant list but not read are common; one
+					// such secret should not cost the user the rest.
+					if denied(err) {
+						ui.Warn("Skipping %s: not readable with these credentials.", ref.Path)
+						return "", nil, errSkip
+					}
 					return ref.Path, value, err
 				})
 		},
@@ -372,6 +378,11 @@ func idleTransport() *http.Transport {
 // neither, so the caller falls back to httpClient.
 func httpClientFor(p secretProvider, serverName string) (*http.Client, error) {
 	creds := p.Credentials
+	// Checked before the early return, which would otherwise drop a lone key
+	// silently and connect without the mTLS the user meant to configure.
+	if creds.ClientKey != "" && creds.ClientCert == "" {
+		return nil, fmt.Errorf("profile %q sets client_key without client_cert", p.Profile)
+	}
 	if creds.ClientCert == "" && creds.CACert == "" && serverName == "" {
 		return nil, nil
 	}

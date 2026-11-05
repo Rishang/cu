@@ -144,3 +144,27 @@ func TestPickFromEmptyList(t *testing.T) {
 		t.Errorf("printed %q, want nothing", out.String())
 	}
 }
+
+// A selection fetch can opt out with errSkip (a secret listable but not
+// readable); the rest of the selection must still be printed, not discarded.
+func TestPickAndPrintSkipsOptedOutSelections(t *testing.T) {
+	out := filterMode(t, "prod")
+
+	err := pickAndPrint([]string{"prod-db", "prod-api"}, itself, "thing", "thing> ",
+		func(name string) (string, string, error) {
+			if name == "prod-db" {
+				return "", "", errSkip
+			}
+			return name, "value-of-" + name, nil
+		})
+	if err != nil {
+		t.Fatalf("pickAndPrint failed on a skipped selection, losing the readable ones: %v", err)
+	}
+	var payload map[string]string
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatalf("output is not JSON: %v\n%s", err, out.String())
+	}
+	if len(payload) != 1 || payload["prod-api"] != "value-of-prod-api" {
+		t.Errorf("payload = %v, want only the readable prod-api", payload)
+	}
+}

@@ -35,12 +35,12 @@ func TestAWSLoginRejectsInvalidLocalInputBeforeAWSConfig(t *testing.T) {
 		{
 			name:    "rejects duration below one hour",
 			args:    []string{"aws", "login", "--policy-file", policy, "--duration", "0"},
-			wantErr: "--duration must be between 1 and 24 hours, got 0.",
+			wantErr: "--duration must be between 1 and 12 hours, got 0.",
 		},
 		{
-			name:    "rejects duration above one day",
-			args:    []string{"aws", "login", "--policy-file", policy, "--duration", "25"},
-			wantErr: "--duration must be between 1 and 24 hours, got 25.",
+			name:    "rejects duration the sign-in endpoint would refuse",
+			args:    []string{"aws", "login", "--policy-file", policy, "--duration", "13"},
+			wantErr: "--duration must be between 1 and 12 hours, got 13.",
 		},
 		{
 			name:    "reports unreadable policy path",

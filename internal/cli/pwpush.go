@@ -76,12 +76,7 @@ func newPwpushConfigCommand() *cobra.Command {
 		RunE: func(_ *cobra.Command, _ []string) error {
 			cfg.Source = strings.TrimRight(cfg.Source, "/")
 
-			full, err := loadConfig()
-			if err != nil {
-				return err
-			}
-			full.Psst = *cfg
-			if err := saveConfig(full); err != nil {
+			if err := saveConfigSection("psst", cfg); err != nil {
 				return err
 			}
 			ui.Printf("Saved auth config to %s", configPath())
@@ -137,12 +132,13 @@ func newPwpushListActiveCommand() *cobra.Command {
 				Aligns: []ui.Align{ui.AlignRight, ui.AlignLeft, ui.AlignLeft, ui.AlignRight, ui.AlignRight},
 				Border: ui.Dim,
 			}
-			for i, push := range pushes {
+			for _, push := range pushes {
 				if push.DaysRemaining <= 0 {
 					continue
 				}
+				// Numbered by row shown, so expired pushes leave no gaps.
 				table.Rows = append(table.Rows, []ui.Cell{
-					ui.Text(strconv.Itoa(i), ui.Plain),
+					ui.Text(strconv.Itoa(len(table.Rows)), ui.Plain),
 					ui.Text(push.Note, ui.Plain),
 					ui.Text(cfg.Source+"/p/"+push.URLToken, ui.Cyan),
 					ui.Text(strconv.Itoa(push.DaysRemaining), ui.Plain),
@@ -153,7 +149,12 @@ func newPwpushListActiveCommand() *cobra.Command {
 				ui.Warn("No active passwords.")
 				return nil
 			}
-			table.Render(ui.Err)
+			// The table is the data, so stdout; colour off when that is a
+			// file or pipe, since colour follows stderr's terminal otherwise.
+			if !ui.OutIsTerminal() {
+				ui.SetColor(false)
+			}
+			table.Render(ui.Out)
 			return nil
 		},
 	}
@@ -247,8 +248,14 @@ func newPwpushSendCommand() *cobra.Command {
 			if token == "" {
 				return fmt.Errorf("succeeded but no URL token was returned: %s", string(response))
 			}
-			fmt.Fprintln(ui.Out)
-			fmt.Fprintln(ui.Out, ui.Blue.Render(cfg.Source+"/p/"+token))
+			// Piped (| pbcopy) it must be the bare URL: no spacer line and no
+			// escape codes, which would otherwise be copied along with it.
+			link := cfg.Source + "/p/" + token
+			if ui.OutIsTerminal() {
+				fmt.Fprintln(ui.Out)
+				link = ui.Blue.Render(link)
+			}
+			fmt.Fprintln(ui.Out, link)
 			return nil
 		},
 	}

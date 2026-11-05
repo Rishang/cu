@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"os/exec"
 
@@ -63,12 +64,12 @@ container it came from.
   cu k logs -n prod -f -t 100     # pick a pod in prod, follow the last 100 lines
   cu k logs -A -f > app.log       # search all namespaces, follow, redirect to a file`,
 		Args: cobra.NoArgs,
-		RunE: func(_ *cobra.Command, _ []string) error {
-			pod, err := pickPod(allNamespaces, namespace)
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			pod, err := pickPod(cmd.Context(), allNamespaces, namespace)
 			if err != nil || pod == nil {
 				return err
 			}
-			return kube.StreamLogs(*pod, follow, tail, ui.Out)
+			return kube.StreamLogs(cmd.Context(), *pod, follow, tail, ui.Out)
 		},
 	}
 
@@ -101,8 +102,8 @@ than one container asks which, unless -c already named it.
 
 cu exits with the command's own status, so this works in a script.`,
 		Args: cobra.ArbitraryArgs,
-		RunE: func(_ *cobra.Command, args []string) error {
-			pod, err := pickPod(allNamespaces, namespace)
+		RunE: func(cmd *cobra.Command, args []string) error {
+			pod, err := pickPod(cmd.Context(), allNamespaces, namespace)
 			if err != nil || pod == nil {
 				return err
 			}
@@ -125,7 +126,7 @@ cu exits with the command's own status, so this works in a script.`,
 				command = []string{"sh"}
 			}
 
-			err = kube.Exec(*pod, container, command)
+			err = kube.Exec(cmd.Context(), *pod, container, command)
 			var exitErr *exec.ExitError
 			if errors.As(err, &exitErr) {
 				// The container's exit status is the interesting one, and
@@ -150,9 +151,9 @@ func addScopeFlags(cmd *cobra.Command, allNamespaces *bool, namespace *string) {
 }
 
 // pickPod lists pods and selects one with the shared log preview.
-func pickPod(allNamespaces bool, namespace string) (*kube.Pod, error) {
+func pickPod(ctx context.Context, allNamespaces bool, namespace string) (*kube.Pod, error) {
 	// -A wins over -n inside kube.ListPods, so namespace needs no reset.
-	pods, err := kube.ListPods(allNamespaces, namespace)
+	pods, err := kube.ListPods(ctx, allNamespaces, namespace)
 	if err != nil {
 		return nil, err
 	}
@@ -179,7 +180,7 @@ func pickPod(allNamespaces bool, namespace string) (*kube.Pod, error) {
 // secrets and configmaps.
 func newK8sKeyCommand(
 	use, short, itemName, resource string,
-	value func(kube.KeyRef) (string, error),
+	value func(context.Context, kube.KeyRef) (string, error),
 ) *cobra.Command {
 	var (
 		allNamespaces bool
@@ -190,14 +191,15 @@ func newK8sKeyCommand(
 		Use:   use,
 		Short: short,
 		Args:  cobra.NoArgs,
-		RunE: func(_ *cobra.Command, _ []string) error {
-			refs, err := kube.ListKeys(resource, allNamespaces, namespace)
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			ctx := cmd.Context()
+			refs, err := kube.ListKeys(ctx, resource, allNamespaces, namespace)
 			if err != nil {
 				return err
 			}
 			return pickAndPrint(refs, kube.KeyRef.Display, itemName, use+"> ",
 				func(ref kube.KeyRef) (string, string, error) {
-					v, err := value(ref)
+					v, err := value(ctx, ref)
 					return ref.Display(), v, err
 				})
 		},
@@ -211,19 +213,20 @@ func newK8sKeyCommand(
 // as an argument skips fzf, so `cu k ns prod` works from a script.
 func newKubeSwitchCommand(
 	use, short, noun string,
-	list func() ([]string, error),
-	active func() string,
-	switchTo func(string) error,
+	list func(context.Context) ([]string, error),
+	active func(context.Context) string,
+	switchTo func(context.Context, string) error,
 ) *cobra.Command {
 	return &cobra.Command{
 		Use:   use + " [name]",
 		Short: short,
 		Args:  cobra.MaximumNArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
 			if len(args) == 1 {
-				return switchTo(args[0])
+				return switchTo(ctx, args[0])
 			}
-			names, err := list()
+			names, err := list(ctx)
 			if err != nil {
 				return err
 			}
@@ -231,14 +234,14 @@ func newKubeSwitchCommand(
 			// Marking the active entry answers "which am I on?" without a
 			// second command. Styling only touches the label, so what gets
 			// switched to is still the plain name.
-			current := active()
+			current := active(ctx)
 			selected, err := pickFrom(names, func(name string) string {
 				return markCurrent(name, current)
 			}, noun, pick.Options{Prompt: noun + "> "})
 			if err != nil || len(selected) == 0 {
 				return err
 			}
-			return switchTo(selected[0])
+			return switchTo(ctx, selected[0])
 		},
 	}
 }

@@ -6,9 +6,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"syscall"
 
 	"github.com/spf13/cobra"
+
+	"github.com/Rishang/cloudutil/internal/proc"
 )
 
 func newTaskCommand() *cobra.Command {
@@ -38,6 +39,7 @@ Example:
   cu task default`,
 		// Task names and their flags belong to task, not to cu.
 		FParseErrWhitelist: cobra.FParseErrWhitelist{UnknownFlags: true},
+		Args:               cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			binary, err := exec.LookPath("task")
 			if err != nil {
@@ -45,7 +47,7 @@ Example:
 			}
 
 			argv := append([]string{"task", "-t", taskfile, "-d", directory}, args...)
-			if err := syscall.Exec(binary, argv, os.Environ()); err != nil {
+			if err := proc.Replace(binary, argv); err != nil {
 				return fmt.Errorf("could not exec %s: %w", binary, err)
 			}
 			return nil

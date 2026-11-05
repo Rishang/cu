@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"cmp"
 	"encoding/json"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"strings"
 
 	yaml "github.com/goccy/go-yaml"
+	"github.com/goccy/go-yaml/parser"
 
 	"github.com/Rishang/cloudutil/internal/ui"
 )
@@ -39,8 +41,10 @@ type cuConfig struct {
 
 func configPath() string { return filepath.Join(configHome(), "config.yml") }
 
-// loadConfig reads config.yml, returning a zero-value config if it doesn't
-// exist yet — callers decide whether an empty section is an error.
+// loadConfig reads config.yml with ${VAR} references expanded, returning a
+// zero-value config if it doesn't exist yet — callers decide whether an empty
+// section is an error. It is read-only: writes go through saveConfigSection,
+// so expanded secrets never make it back into the file.
 func loadConfig() (*cuConfig, error) {
 	data, err := os.ReadFile(configPath())
 	if err != nil {
@@ -76,13 +80,22 @@ func expandConfigEnv(data []byte) []byte {
 	})
 }
 
-// saveConfig writes config.yml. Kept owner-readable only, since it holds
-// tokens and client secrets in plaintext.
-func saveConfig(cfg *cuConfig) error {
+// saveConfigSection rewrites one top-level section of config.yml and leaves
+// the rest of the file as the user wrote it: comments, ${VAR} references and
+// other sections. Round-tripping the whole file through cuConfig instead
+// would drop the comments and write expanded secrets over their references.
+// Kept owner-readable only, since the file holds tokens in plaintext.
+func saveConfigSection(key string, value any) error {
 	if err := os.MkdirAll(configHome(), 0o700); err != nil {
 		return err
 	}
-	data, err := yaml.Marshal(cfg)
+	data, err := os.ReadFile(configPath())
+	switch {
+	case os.IsNotExist(err):
+		data, err = yaml.Marshal(map[string]any{key: value})
+	case err == nil:
+		data, err = replaceConfigSection(data, key, value)
+	}
 	if err != nil {
 		return err
 	}
@@ -92,6 +105,37 @@ func saveConfig(cfg *cuConfig) error {
 	// WriteFile's mode applies only on creation; enforce it too when a
 	// pre-existing config file had broader permissions.
 	return os.Chmod(configPath(), 0o600)
+}
+
+// replaceConfigSection swaps the value under top-level key in a YAML document,
+// appending the section when the document has none yet.
+func replaceConfigSection(data []byte, key string, value any) ([]byte, error) {
+	file, err := parser.ParseBytes(data, parser.ParseComments)
+	if err != nil {
+		return nil, fmt.Errorf("could not parse %s: %w", configPath(), err)
+	}
+	path, err := yaml.PathString("$." + key)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := path.FilterFile(file); err != nil {
+		section, err := yaml.Marshal(map[string]any{key: value})
+		if err != nil {
+			return nil, err
+		}
+		if len(data) > 0 && data[len(data)-1] != '\n' {
+			data = append(data, '\n')
+		}
+		return append(data, section...), nil
+	}
+	encoded, err := yaml.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	if err := path.ReplaceWithReader(file, bytes.NewReader(encoded)); err != nil {
+		return nil, fmt.Errorf("could not update %s in %s: %w", key, configPath(), err)
+	}
+	return []byte(file.String() + "\n"), nil
 }
 
 // decodeSecretValue nests JSON secrets in the output and passes anything else

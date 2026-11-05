@@ -56,7 +56,7 @@ func TestLoadHCLExtension(t *testing.T) {
 
 func TestLoadHCLInvalid(t *testing.T) {
 	_, err := LoadFile(write(t, "bad.tfvars", "this is not { valid hcl !!!"))
-	assertErrContains(t, err, "Invalid HCL")
+	assertErrContains(t, err, "invalid HCL")
 }
 
 func TestLoadTFBlocks(t *testing.T) {

@@ -33,6 +33,7 @@ Password Pusher, and a Taskfile passthrough.
 | `internal/pick/` | fzf-as-a-library selection |
 | `internal/kube/` | kubectl invocation and parsing |
 | `internal/awsx/` | AWS SDK helpers |
+| `internal/proc/` | Handing the terminal to another program (exec on Unix, child process on Windows) |
 | `internal/diff/` | Semantic diff engine and its config |
 | `tests/assets/` | Fixtures shared by the Go tests |
 

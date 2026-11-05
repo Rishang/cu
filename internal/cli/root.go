@@ -2,6 +2,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -50,6 +51,11 @@ func pickStrings(items []string, noun string, opts pick.Options) ([]string, erro
 // itself labels a string list with itself.
 func itself(s string) string { return s }
 
+// errSkip is what a pickAndPrint fetch returns to leave one selection out
+// after explaining why itself — e.g. a secret these credentials may list but
+// not read — instead of discarding everything else the user picked.
+var errSkip = errors.New("selection skipped")
+
 // pickAndPrint is the browse-a-secret-store flow: multi-select from items, fetch
 // each selection, and print the results as one JSON object. fetch returns the
 // key to file the result under along with the value, since what names an entry
@@ -65,6 +71,9 @@ func pickAndPrint[T, V any](items []T, label func(T) string, noun, prompt string
 	payload := make(map[string]V, len(selected))
 	for _, item := range selected {
 		key, value, err := fetch(item)
+		if errors.Is(err, errSkip) {
+			continue
+		}
 		if err != nil {
 			return err
 		}
